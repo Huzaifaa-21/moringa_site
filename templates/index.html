@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pure Moringa | Premium Organic Moringa Powder</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="container header-content">
+            <div class="logo">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Pure Moringa Logo" class="logo-image">
+                <h1>Pure Moringa</h1>
+            </div>
+            <div class="menu-toggle">
+                <i class="fas fa-bars"></i>
+            </div>
+            <nav id="nav">
+                <ul>
+                    <li><a href="#" class="nav-link" data-page="home">Home</a></li>
+                    <li><a href="#" class="nav-link" data-page="about">About</a></li>
+                    <li><a href="#" class="nav-link" data-page="order">Order</a></li>
+                    <li><a href="#" class="nav-link" data-page="contact">Contact</a></li>
+                    <li><a href="/admin/login" target="_blank">Admin</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Home Page -->
+    <div id="home" class="page active">
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="container hero-content">
+                <h2>Premium Moringa Powder for Optimal Wellness</h2>
+                <p>100% Pure, Organic, and Chemical-Free Moringa Powder sourced from the rich farms of Bundelkhand</p>
+                <a href="#" class="btn nav-link" data-page="order">Order Now</a>
+            </div>
+        </section>
+
+        <!-- About Preview Section -->
+        <section class="about-preview">
+            <div class="container">
+                <div class="section-title">
+                    <h2>The Miracle Tree</h2>
+                    <p>Discover the incredible health benefits of Moringa Oleifera</p>
+                </div>
+                <div class="about-content">
+                    <div class="about-text">
+                        <p>Welcome to the world of wellness with our premium Moringa Powder, a powerful natural supplement sourced directly from the rich, organic farms of Bundelkhand, South Uttar Pradesh. Known as the "Miracle Tree," Moringa oleifera is a treasure trove of essential nutrients and antioxidants, revered in Ayurveda and modern health science for its remarkable health benefits.</p>
+                        <p>Our Moringa Powder is 100% pure, organic, and chemical-free, cultivated using sustainable farming methods in the fertile soils of rural Bundelkhand. Each leaf is handpicked at peak freshness and carefully shade-dried to retain maximum nutrition, then finely ground into a vibrant green powder that's easy to consume and full of life.</p>
+                        <a href="#" class="btn nav-link" data-page="about">Learn More</a>
+                    </div>
+                    <div class="about-image">
+                        <img src="{{ url_for('static', filename='images/img1.png') }}" alt="Moringa Powder">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="features">
+            <div class="container">
+                <div class="section-title">
+                    <h2>Why Choose Our Moringa Powder?</h2>
+                    <p>Experience the numerous health benefits of our premium product</p>
+                </div>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-leaf"></i>
+                        </div>
+                        <h3>Pure & Organic</h3>
+                        <p>Sourced from local farms using no pesticides or harmful chemicals. Certified for purity and safety.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-vitamins"></i>
+                        </div>
+                        <h3>Nutrient-Rich</h3>
+                        <p>Packed with vitamins A, C, E, K, and a complete range of B-vitamins, along with iron, calcium, magnesium, potassium, and plant based protein.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <h3>Immunity Booster</h3>
+                        <p>High in antioxidants and anti-inflammatory compounds, it helps strengthen your body's natural defense system.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Usage Section -->
+        <section class="usage">
+            <div class="container">
+                <div class="section-title">
+                    <h2>How to Use Moringa Powder</h2>
+                    <p>Incorporating Moringa Powder into your daily routine is simple and effective</p>
+                </div>
+                <div class="usage-content">
+                    <div class="usage-item">
+                        <h3>Moringa Drink</h3>
+                        <p>Mix 1 teaspoon of Moringa powder in warm water or lemon water on an empty stomach.</p>
+                    </div>
+                    <div class="usage-item">
+                        <h3>Smoothies & Juices</h3>
+                        <p>Add to fruit smoothies, vegetable juices, or protein shakes for a nutritious boost.</p>
+                    </div>
+                    <div class="usage-item">
+                        <h3>Sprinkle on Food</h3>
+                        <p>Use as a seasoning over soups, dals, rice, or salads. Just a small pinch can go a long way.</p>
+                    </div>
+                    <div class="usage-item">
+                        <h3>Baking & Cooking</h3>
+                        <p>Add to your roti dough, pancake batter, or baked goods for a green twist.</p>
+                    </div>
+                    <div class="usage-item">
+                        <h3>Face Pack (optional use)</h3>
+                        <p>Mix with honey or yogurt and apply as a natural face pack for glowing skin.</p>
+                    </div>
+                    <div class="usage-item">
+                        <h3>Recommended Dosage</h3>
+                        <p>Start with half to one teaspoon per day, and gradually increase to 1–2 teaspoons based on your body's response.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Gallery Section -->
+        <section class="gallery">
+            <div class="container">
+                <div class="section-title">
+                    <h2>Product Gallery</h2>
+                    <p>See our premium Moringa products</p>
+                </div>
+                <div class="gallery-grid">
+                    <div class="gallery-item">
+                        <img src="{{ url_for('static', filename='images/img3.png') }}" alt="Moringa Product Image 1">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ url_for('static', filename='images/img4.png') }}" alt="Moringa Product Image 2">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ url_for('static', filename='images/img5.png') }}" alt="Moringa Product Image 3">
+                    </div>
+                    <div class="gallery-item">
+                        <img src="{{ url_for('static', filename='images/img6.png') }}" alt="Moringa Product Image 4">
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- About Page -->
+    <div id="about" class="page">
+        <section class="about-detailed">
+            <div class="container">
+                <div class="section-title">
+                    <h2>About Our Moringa Powder</h2>
+                    <p>Learn about our sourcing, process, and commitment to quality</p>
+                </div>
+                <div class="about-content">
+                    <div class="about-text">
+                        <p>Our Moringa Powder is sourced directly from the rich, organic farms of Bundelkhand, South Uttar Pradesh. This region is known for its fertile soil and ideal climate for growing Moringa trees, which are often called the "Miracle Tree" due to their incredible nutritional value.</p>
+                        <p>We work directly with local farmers who use sustainable farming practices, ensuring that our Moringa is grown without pesticides or harmful chemicals. Each leaf is handpicked at peak freshness to guarantee the highest nutrient content.</p>
+                        <p>After harvesting, the leaves are carefully shade-dried to preserve their nutritional value and vibrant green color. They are then finely ground into a powder that retains all the natural goodness of the fresh leaves.</p>
+                        <p>With rising concerns over immunity and well-being, our Moringa Powder is a daily dose of vitality for people of all ages. It's not just a supplement – it's a commitment to clean living, traditional wisdom, and better health.</p>
+                    </div>
+                    <div class="about-image">
+                        <img src="{{ url_for('static', filename='images/about.png') }}" alt="Moringa Farming">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="container">
+                <div class="section-title">
+                    <h2>Health Benefits</h2>
+                    <p>Why Moringa is considered a superfood</p>
+                </div>
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-brain"></i>
+                        </div>
+                        <h3>Mental Clarity & Energy</h3>
+                        <p>Enhances focus, reduces fatigue, and improves overall energy levels without caffeine.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-heart"></i>
+                        </div>
+                        <h3>Diabetic & Heart-Friendly</h3>
+                        <p>Helps regulate blood sugar levels and supports cardiovascular health.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-stomach"></i>
+                        </div>
+                        <h3>Supports Digestion</h3>
+                        <p>Rich in fiber and detoxifying compounds to promote healthy gut and metabolism.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">
+                            <i class="fas fa-spa"></i>
+                        </div>
+                        <h3>Good for Skin & Hair</h3>
+                        <p>Antioxidants nourish skin from within and promote stronger, shinier hair.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Order Page -->
+    <div id="order" class="page">
+        <section class="product">
+            <div class="container">
+                <div class="section-title">
+                    <h2>Order Moringa Powder</h2>
+                    <p>Get your supply of premium organic Moringa Powder delivered to your doorstep</p>
+                </div>
+                <div class="product-content">
+                    <div class="product-image">
+                        <img src="{{ url_for('static', filename='images/img2.png') }}" alt="Moringa Powder Product">
+                    </div>
+                    <h3>Premium Organic Moringa Powder</h3>
+                    <p>100% pure, chemical-free Moringa powder sourced from organic farms in Bundelkhand, South Uttar Pradesh. Packed with essential nutrients and antioxidants for optimal health.</p>
+                    <div class="price">₹499 / 200g pouch</div>
+                    <div class="shipping-info">
+                        <p><i class="fas fa-truck"></i> Free shipping on orders of 3+ pouches</p>
+                        <p><i class="fas fa-shield-alt"></i> Secure payment with Razorpay</p>
+                    </div>
+                    
+                    <form id="order-form">
+                        <div class="form-group">
+                            <label for="quantity">Quantity:</label>
+                            <select id="quantity" name="quantity" onchange="updateTotal()">
+                                <option value="1">1 Pouch (200g) - ₹549</option>
+                                <option value="2">2 Pouches (400g) - ₹1048</option>
+                                <option value="3">3 Pouches (600g) - ₹1497 (Free Shipping)</option>
+                                <option value="5">5 Pouches (1kg) - ₹2495 (Free Shipping)</option>
+                            </select>
+                        </div>
+                        <div class="total-amount">
+                            <h4>Total: <span id="total-display">₹549</span></h4>
+                        </div>
+                        <div class="form-group">
+                            <label for="name">Full Name:</label>
+                            <input type="text" id="name" name="name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email:</label>
+                            <input type="email" id="email" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">Phone:</label>
+                            <input type="tel" id="phone" name="phone" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="address">Shipping Address:</label>
+                            <textarea id="address" name="address" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="pincode">Pincode:</label>
+                            <input type="text" id="pincode" name="pincode" required>
+                        </div>
+                        <button type="submit" class="btn">
+                            <i class="fas fa-credit-card"></i> Pay with Razorpay
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Contact Page -->
+    <div id="contact" class="page">
+        <section class="contact">
+            <div class="container">
+                <div class="section-title">
+                    <h2>Contact Us</h2>
+                    <p>Get in touch with us for any questions or inquiries</p>
+                </div>
+                <div class="contact-content">
+                    <div class="contact-info">
+                        <h3>Get In Touch</h3>
+                        <p>We'd love to hear from you. Whether you have questions about our Moringa powder, want to know more about our farming practices, or need assistance with an order, we're here to help.</p>
+                        <div class="contact-details">
+                            <p><i class="fas fa-map-marker-alt"></i> Bundelkhand, South Uttar Pradesh, India</p>
+                            <p><i class="fas fa-phone"></i> +91 98765 43210</p>
+                            <p><i class="fas fa-envelope"></i> info@puremoringa.com</p>
+                        </div>
+                    </div>
+                    <div class="contact-form">
+                        <h3>Send us a Message</h3>
+                        <form id="contact-form">
+                            <div class="form-group">
+                                <label for="contact-name">Your Name:</label>
+                                <input type="text" id="contact-name" name="name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="contact-email">Email:</label>
+                                <input type="email" id="contact-email" name="email" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="contact-subject">Subject:</label>
+                                <input type="text" id="contact-subject" name="subject" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="contact-message">Message:</label>
+                                <textarea id="contact-message" name="message" required></textarea>
+                            </div>
+                            <button type="submit" class="btn">Send Message</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3>About Us</h3>
+                    <p>We provide premium quality Moringa powder sourced directly from organic farms in Bundelkhand, South Uttar Pradesh. Our mission is to bring the incredible health benefits of Moringa to everyone.</p>
+                </div>
+                <div class="footer-section">
+                    <h3>Quick Links</h3>
+                    <ul>
+                        <li><a href="#" class="nav-link" data-page="home">Home</a></li>
+                        <li><a href="#" class="nav-link" data-page="about">About</a></li>
+                        <li><a href="#" class="nav-link" data-page="order">Order</a></li>
+                        <li><a href="#" class="nav-link" data-page="contact">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3>Contact Info</h3>
+                    <p><i class="fas fa-map-marker-alt"></i> Bundelkhand, South Uttar Pradesh, India</p>
+                    <p><i class="fas fa-phone"></i> +91 98765 43210</p>
+                    <p><i class="fas fa-envelope"></i> info@puremoringa.com</p>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 Pure Moringa. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Notification Container -->
+    <div id="notification-container"></div>
+
+    <script>
+        // Simple page navigation
+        document.addEventListener('DOMContentLoaded', function() {
+            const navLinks = document.querySelectorAll('.nav-link');
+            const pages = document.querySelectorAll('.page');
+            const menuToggle = document.querySelector('.menu-toggle');
+            const nav = document.getElementById('nav');
+            
+            // Toggle mobile menu
+            menuToggle.addEventListener('click', function() {
+                nav.classList.toggle('active');
+            });
+            
+            // Handle navigation
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const targetPage = this.getAttribute('data-page');
+                    
+                    if (targetPage) {
+                        // Hide all pages
+                        pages.forEach(page => {
+                            page.classList.remove('active');
+                        });
+                        
+                        // Show target page
+                        document.getElementById(targetPage).classList.add('active');
+                        
+                        // Close mobile menu if open
+                        nav.classList.remove('active');
+                        
+                        // Scroll to top
+                        window.scrollTo(0, 0);
+                    }
+                });
+            });
+            
+            // Update total amount based on quantity
+            window.updateTotal = function() {
+                const quantity = parseInt(document.getElementById('quantity').value);
+                const basePrice = 499;
+                const shipping = quantity >= 3 ? 0 : 50;
+                const total = (basePrice * quantity) + shipping;
+                document.getElementById('total-display').textContent = `₹${total}`;
+            };
+            
+            // Initialize total
+            updateTotal();
+            
+            // Payment processing
+            document.getElementById('order-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const formData = {
+                    name: document.getElementById('name').value,
+                    email: document.getElementById('email').value,
+                    phone: document.getElementById('phone').value,
+                    address: document.getElementById('address').value,
+                    pincode: document.getElementById('pincode').value,
+                    quantity: document.getElementById('quantity').value
+                };
+                
+                // Validate form
+                if (!formData.name || !formData.email || !formData.phone || !formData.address || !formData.pincode) {
+                    showNotification('Please fill in all required fields', 'error');
+                    return;
+                }
+                
+                // Show loading
+                const submitBtn = document.querySelector('#order-form button[type="submit"]');
+                const originalText = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+                submitBtn.disabled = true;
+                
+                // Create order
+                fetch('/api/create-order', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    // Initialize Razorpay
+                    const options = {
+                        key: data.key,
+                        amount: data.amount * 100,
+                        currency: data.currency,
+                        name: data.name,
+                        description: data.description,
+                        order_id: data.order_id,
+                        prefill: data.prefill,
+                        theme: {
+                            color: '#2e7d32'
+                        },
+                        handler: function(response) {
+                            verifyPayment(response, formData);
+                        },
+                        modal: {
+                            ondismiss: function() {
+                                submitBtn.innerHTML = originalText;
+                                submitBtn.disabled = false;
+                                showNotification('Payment cancelled', 'error');
+                            }
+                        }
+                    };
+                    
+                    const rzp = new Razorpay(options);
+                    rzp.open();
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showNotification('Error creating order: ' + error.message, 'error');
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                });
+            });
+            
+            // Verify payment
+            function verifyPayment(response, orderData) {
+                fetch('/api/verify-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        razorpay_order_id: response.razorpay_order_id,
+                        razorpay_payment_id: response.razorpay_payment_id,
+                        razorpay_signature: response.razorpay_signature,
+                        receipt: orderData.receipt || response.razorpay_order_id
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        showNotification('Payment successful! Your order has been placed.', 'success');
+                        document.getElementById('order-form').reset();
+                        updateTotal();
+                        
+                        // Generate receipt
+                        window.open(`/api/generate-receipt/${data.order_id}`, '_blank');
+                    } else {
+                        throw new Error(data.error || 'Payment verification failed');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showNotification('Payment verification failed: ' + error.message, 'error');
+                })
+                .finally(() => {
+                    const submitBtn = document.querySelector('#order-form button[type="submit"]');
+                    submitBtn.innerHTML = '<i class="fas fa-credit-card"></i> Pay with Razorpay';
+                    submitBtn.disabled = false;
+                });
+            }
+            
+            // Show notification
+            function showNotification(message, type) {
+                const container = document.getElementById('notification-container');
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                notification.innerHTML = `
+                    <span>${message}</span>
+                    <button onclick="this.parentElement.remove()">×</button>
+                `;
+                
+                container.appendChild(notification);
+                
+                // Auto remove after 5 seconds
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.remove();
+                    }
+                }, 5000);
+            }
+            
+            // Make showNotification global
+            window.showNotification = showNotification;
+            
+            // Contact form submission
+            document.getElementById('contact-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                showNotification('Message sent! We will get back to you soon.', 'success');
+                this.reset();
+            });
+        });
+    </script>
+</body>
+</html>
