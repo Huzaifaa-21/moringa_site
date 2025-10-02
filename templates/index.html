@@ -13,7 +13,7 @@
     <header>
         <div class="container header-content">
             <div class="logo">
-                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Pure Moringa Logo" class="logo-image">
+                <img src="{{ url_for('images', filename='logo.png') }}" alt="Pure Moringa Logo" class="logo-image">
                 <h1>Pure Moringa</h1>
             </div>
             <div class="menu-toggle">
@@ -25,7 +25,13 @@
                     <li><a href="#" class="nav-link" data-page="about">About</a></li>
                     <li><a href="#" class="nav-link" data-page="order">Order</a></li>
                     <li><a href="#" class="nav-link" data-page="contact">Contact</a></li>
-                    <li><a href="/admin/login" target="_blank">Admin</a></li>
+                    {% if session.get('customer_id') %}
+                    <li><a href="{{ url_for('customer_dashboard') }}">Dashboard</a></li>
+                    <li><a href="{{ url_for('customer_logout') }}">Logout</a></li>
+                    {% else %}
+                    <li><a href="{{ url_for('customer_login') }}">Login</a></li>
+                    <li><a href="{{ url_for('customer_register') }}">Register</a></li>
+                    {% endif %}
                 </ul>
             </nav>
         </div>
@@ -56,7 +62,7 @@
                         <a href="#" class="btn nav-link" data-page="about">Learn More</a>
                     </div>
                     <div class="about-image">
-                        <img src="{{ url_for('static', filename='images/img1.png') }}" alt="Moringa Powder">
+                        <img src="{{ url_for('images', filename='img1.png') }}" alt="Moringa Powder">
                     </div>
                 </div>
             </div>
@@ -140,16 +146,16 @@
                 </div>
                 <div class="gallery-grid">
                     <div class="gallery-item">
-                        <img src="{{ url_for('static', filename='images/img3.png') }}" alt="Moringa Product Image 1">
+                        <img src="{{ url_for('images', filename='img3.png') }}" alt="Moringa Product Image 1">
                     </div>
                     <div class="gallery-item">
-                        <img src="{{ url_for('static', filename='images/img4.png') }}" alt="Moringa Product Image 2">
+                        <img src="{{ url_for('images', filename='img4.png') }}" alt="Moringa Product Image 2">
                     </div>
                     <div class="gallery-item">
-                        <img src="{{ url_for('static', filename='images/img5.png') }}" alt="Moringa Product Image 3">
+                        <img src="{{ url_for('images', filename='img5.png') }}" alt="Moringa Product Image 3">
                     </div>
                     <div class="gallery-item">
-                        <img src="{{ url_for('static', filename='images/img6.png') }}" alt="Moringa Product Image 4">
+                        <img src="{{ url_for('images', filename='img6.png') }}" alt="Moringa Product Image 4">
                     </div>
                 </div>
             </div>
@@ -172,7 +178,7 @@
                         <p>With rising concerns over immunity and well-being, our Moringa Powder is a daily dose of vitality for people of all ages. It's not just a supplement – it's a commitment to clean living, traditional wisdom, and better health.</p>
                     </div>
                     <div class="about-image">
-                        <img src="{{ url_for('static', filename='images/about.png') }}" alt="Moringa Farming">
+                        <img src="{{ url_for('images', filename='about.png') }}" alt="Moringa Farming">
                     </div>
                 </div>
             </div>
@@ -228,7 +234,7 @@
                 </div>
                 <div class="product-content">
                     <div class="product-image">
-                        <img src="{{ url_for('static', filename='images/img2.png') }}" alt="Moringa Powder Product">
+                        <img src="{{ url_for('images', filename='img2.png') }}" alt="Moringa Powder Product">
                     </div>
                     <h3>Premium Organic Moringa Powder</h3>
                     <p>100% pure, chemical-free Moringa powder sourced from organic farms in Bundelkhand, South Uttar Pradesh. Packed with essential nutrients and antioxidants for optimal health.</p>
@@ -237,7 +243,16 @@
                         <p><i class="fas fa-truck"></i> Free shipping on orders of 3+ pouches</p>
                         <p><i class="fas fa-shield-alt"></i> Secure payment with Razorpay</p>
                     </div>
-                    
+
+                    {% if not session.get('customer_id') %}
+                    <div class="login-prompt" style="margin: 1rem 0; padding: 0.75rem 1rem; background:#f0f7ff; border:1px solid #cfe4ff; border-radius:8px;">
+                        Returning customer? <a href="{{ url_for('customer_login') }}" class="btn btn-secondary" style="margin-left:0.5rem;">Log in</a>
+                        <span style="margin:0 0.5rem;">or</span>
+                        <a href="{{ url_for('customer_register') }}" class="btn btn-secondary">Create an account</a>
+                        <span style="display:block; margin-top:0.5rem; color:#555;">Creating an account lets you track your orders and download receipts anytime.</span>
+                    </div>
+                    {% endif %}
+
                     <form id="order-form">
                         <div class="form-group">
                             <label for="quantity">Quantity:</label>
@@ -340,6 +355,13 @@
                         <li><a href="#" class="nav-link" data-page="about">About</a></li>
                         <li><a href="#" class="nav-link" data-page="order">Order</a></li>
                         <li><a href="#" class="nav-link" data-page="contact">Contact</a></li>
+                        {% if session.get('customer_id') %}
+                        <li><a href="{{ url_for('customer_dashboard') }}">Dashboard</a></li>
+                        <li><a href="{{ url_for('customer_logout') }}">Logout</a></li>
+                        {% else %}
+                        <li><a href="{{ url_for('customer_login') }}">Login</a></li>
+                        <li><a href="{{ url_for('customer_register') }}">Register</a></li>
+                        {% endif %}
                     </ul>
                 </div>
                 <div class="footer-section">

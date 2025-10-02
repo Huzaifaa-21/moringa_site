@@ -9,8 +9,8 @@ reportlab==4.0.4
 Werkzeug==2.3.7
 Jinja2==3.1.2
 requests==2.31.0
-datetime
-uuid
 json5==0.9.14
 PyMySQL==1.1.0
 cryptography==41.0.7
+pyotp==2.8.0
+email-validator==2.1.0.post1

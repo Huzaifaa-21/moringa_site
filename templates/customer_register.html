@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create Account - Moringa</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  <style>
+    .auth-container { max-width: 520px; margin: 60px auto; padding: 32px; border-radius: 12px; background: #fff; box-shadow: 0 10px 25px rgba(0,0,0,0.08); }
+    .auth-header { text-align: center; margin-bottom: 24px; }
+    .auth-header img { height: 56px; }
+    .auth-header h1 { font-size: 24px; margin: 12px 0 4px; }
+    .auth-header p { color: #666; margin: 0; }
+    form .form-group { margin-bottom: 16px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input[type="text"], input[type="email"], input[type="password"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; transition: border-color .2s; }
+    input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus { border-color: #4caf50; outline: none; }
+    .btn { width: 100%; padding: 12px; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .btn:hover { background: #43a047; }
+    .links { margin-top: 12px; text-align: center; }
+    .links a { color: #4caf50; text-decoration: none; }
+    .flash { margin-bottom: 12px; padding: 12px; border-radius: 8px; }
+    .flash.error { background: #ffe5e5; color: #b00020; }
+    .flash.success { background: #e7f6e7; color: #1b5e20; }
+  </style>
+</head>
+<body>
+  <div class="auth-container">
+    <div class="auth-header">
+      <img src="{{ url_for('images', filename='logo.png') }}" alt="Moringa" />
+      <h1>Create your account</h1>
+      <p>Join us to easily manage your orders</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('customer_register') }}">
+      {{ form.hidden_tag() }}
+      <div class="form-group">
+        {{ form.name.label }}
+        {{ form.name(class_='form-control', placeholder='Your full name') }}
+      </div>
+      <div class="form-group">
+        {{ form.email.label }}
+        {{ form.email(class_='form-control', placeholder='you@example.com') }}
+      </div>
+      <div class="form-group">
+        {{ form.phone.label }}
+        {{ form.phone(class_='form-control', placeholder='Phone number') }}
+      </div>
+      <div class="form-group">
+        {{ form.password.label }}
+        {{ form.password(class_='form-control', placeholder='Create a password') }}
+      </div>
+      <div class="form-group">
+        {{ form.submit(class_='btn') }}
+      </div>
+    </form>
+
+    <div class="links">
+      <a href="{{ url_for('customer_login') }}">Already have an account? Log in</a> ·
+      <a href="{{ url_for('index') }}">Back to home</a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_file, make_response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_file, make_response, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_wtf import FlaskForm
@@ -7,7 +7,7 @@ from wtforms.validators import DataRequired, Email
 import razorpay
 import os
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import hashlib
 import hmac
@@ -17,6 +17,10 @@ from reportlab.lib.units import inch
 import io
 import csv
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf.csrf import CSRFProtect
+from functools import wraps
+import secrets
+import pyotp
 
 # Load environment variables
 load_dotenv()
@@ -31,6 +35,20 @@ db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'admin_login'
+
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+    return wrapper
+
+# Enable CSRF protection across forms
+csrf = CSRFProtect(app)
 
 # Initialize Razorpay client
 razorpay_client = razorpay.Client(auth=(os.getenv('RAZORPAY_KEY_ID'), os.getenv('RAZORPAY_KEY_SECRET')))
@@ -48,6 +66,20 @@ class Admin(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(120), nullable=False)
+
+class AdminSecurity(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    admin_id = db.Column(db.Integer, db.ForeignKey('admin.id'), nullable=False, unique=True)
+    mfa_enabled = db.Column(db.Boolean, default=False)
+    totp_secret = db.Column(db.String(32), nullable=True)
+
+class Customer(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    phone = db.Column(db.String(20), nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -70,13 +102,13 @@ class Order(db.Model):
     
     # Status and Timestamps
     status = db.Column(db.String(20), default='pending')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     payment_date = db.Column(db.DateTime, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 @login_manager.user_loader
 def load_user(user_id):
-    return Admin.query.get(int(user_id))
+    return db.session.get(Admin, int(user_id))
 
 # Helper Functions
 def calculate_total(quantity):
@@ -176,7 +208,7 @@ def verify_payment():
             if order:
                 order.razorpay_payment_id = razorpay_payment_id
                 order.status = 'processing'
-                order.payment_date = datetime.utcnow()
+                order.payment_date = datetime.now(timezone.utc)
                 db.session.commit()
                 
                 return jsonify({
@@ -272,41 +304,156 @@ def generate_receipt(order_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Admin Routes
-# Admin Login Form
 class AdminLoginForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
+    otp = StringField('Authenticator Code (if MFA enabled)')
     remember_me = BooleanField('Remember me')
     submit = SubmitField('Login')
 
+@csrf.exempt
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     form = AdminLoginForm()
-
-    # JSON-based login (AJAX)
     if request.method == 'POST' and request.is_json:
         data = request.get_json()
-        username = data.get('username')
+        username = (data.get('username') or '').strip().lower()
         password = data.get('password')
-        admin = Admin.query.filter_by(username=username).first()
+        otp_val = data.get('otp')
+        admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == username).first()
         if admin and check_password_hash(admin.password_hash, password):
+            sec = AdminSecurity.query.filter_by(admin_id=admin.id).first()
+            if sec and sec.mfa_enabled:
+                if not otp_val or not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(otp_val):
+                    return jsonify({'error': 'Invalid MFA code'}), 401
             login_user(admin)
+            app.logger.info(f"Admin '{username}' logged in via JSON")
             return jsonify({'status': 'success', 'redirect': '/admin/dashboard'})
+        app.logger.warning(f"Admin login failed for '{username}' via JSON")
         return jsonify({'error': 'Invalid credentials'}), 401
 
-    # Standard form login
-    if request.method == 'POST' and form.validate_on_submit():
-        admin = Admin.query.filter_by(username=form.username.data).first()
-        if admin and check_password_hash(admin.password_hash, form.password.data):
-            login_user(admin, remember=form.remember_me.data)
-            return redirect(url_for('admin_dashboard'))
-        flash('Invalid credentials', 'error')
-
+    if request.method == 'POST':
+        if form.validate_on_submit():
+            username_input = (form.username.data or '').strip().lower()
+            admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == username_input).first()
+            if admin and check_password_hash(admin.password_hash, form.password.data):
+                sec = AdminSecurity.query.filter_by(admin_id=admin.id).first()
+                if sec and sec.mfa_enabled:
+                    otp_val = form.otp.data
+                    if not otp_val or not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(otp_val):
+                        flash('Invalid MFA code', 'error')
+                        app.logger.warning(f"Admin '{username_input}' provided invalid MFA code")
+                        return render_template('admin_login.html', form=form)
+                login_user(admin, remember=form.remember_me.data)
+                app.logger.info(f"Admin '{username_input}' logged in successfully")
+                return redirect(url_for('admin_dashboard'))
+            flash('Invalid credentials', 'error')
+            app.logger.warning(f"Admin login failed for '{username_input}' via form")
+        else:
+            # Form submission failed (e.g., CSRF or validation errors)
+            if hasattr(form, 'csrf_token') and form.csrf_token.errors:
+                flash('Session expired or invalid CSRF token. Please refresh and try again.', 'error')
+                app.logger.warning('Admin login CSRF validation failed')
+            else:
+                flash('Please correct the highlighted errors and try again.', 'error')
+                app.logger.warning('Admin login form validation failed')
+            return render_template('admin_login.html', form=form)
     return render_template('admin_login.html', form=form)
 
+
+def customer_login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get('customer_id'):
+            return redirect(url_for('customer_login'))
+        return f(*args, **kwargs)
+    return wrapper
+
+# Forms
+class CustomerRegisterForm(FlaskForm):
+    name = StringField('Name', validators=[DataRequired()])
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    phone = StringField('Phone', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    submit = SubmitField('Register')
+
+class CustomerLoginForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    submit = SubmitField('Login')
+
+# Customer authentication routes
+@app.route('/customer/register', methods=['GET', 'POST'])
+def customer_register():
+    form = CustomerRegisterForm()
+    if form.validate_on_submit():
+        existing = Customer.query.filter_by(email=form.email.data.lower()).first()
+        if existing:
+            flash('An account with this email already exists. Please log in.', 'error')
+            return redirect(url_for('customer_login'))
+        customer = Customer(
+            name=form.name.data.strip(),
+            email=form.email.data.lower().strip(),
+            phone=form.phone.data.strip(),
+            password_hash=generate_password_hash(form.password.data)
+        )
+        db.session.add(customer)
+        db.session.commit()
+        session['customer_id'] = customer.id
+        flash('Registration successful. Welcome!', 'success')
+        return redirect(url_for('customer_dashboard'))
+    return render_template('customer_register.html', form=form)
+
+@app.route('/customer/login', methods=['GET', 'POST'])
+def customer_login():
+    form = CustomerLoginForm()
+    if request.method == 'POST':
+        if form.validate_on_submit():
+            email_input = ((form.email.data or '').strip().lower())
+            customer = Customer.query.filter_by(email=email_input).first()
+            if customer and check_password_hash(customer.password_hash, form.password.data):
+                session['customer_id'] = customer.id
+                flash('Logged in successfully.', 'success')
+                app.logger.info(f"Customer '{email_input}' logged in successfully")
+                return redirect(url_for('customer_dashboard'))
+            # Keep generic error for security, but log specifics
+            if not customer:
+                app.logger.warning(f"Customer login failed: account not found for '{email_input}'")
+            else:
+                app.logger.warning(f"Customer login failed: incorrect password for '{email_input}'")
+            flash('Invalid credentials', 'error')
+        else:
+            if hasattr(form, 'csrf_token') and form.csrf_token.errors:
+                flash('Session expired or invalid CSRF token. Please refresh and try again.', 'error')
+                app.logger.warning('Customer login CSRF validation failed')
+            else:
+                flash('Please correct the highlighted errors and try again.', 'error')
+                app.logger.warning('Customer login form validation failed')
+            return render_template('customer_login.html', form=form)
+    return render_template('customer_login.html', form=form)
+
+@app.route('/customer/logout')
+@customer_login_required
+def customer_logout():
+    session.pop('customer_id', None)
+    flash('You have been logged out.', 'success')
+    return redirect(url_for('customer_login'))
+
+@app.route('/customer/dashboard')
+@customer_login_required
+def customer_dashboard():
+    customer_id = session.get('customer_id')
+    customer = db.session.get(Customer, customer_id)
+    if not customer:
+        flash('Please log in to continue.', 'error')
+        return redirect(url_for('customer_login'))
+    orders = Order.query.filter_by(customer_email=customer.email).order_by(Order.created_at.desc()).all()
+    return render_template('customer_dashboard.html', customer=customer, orders=orders)
+
+# Duplicate admin login block removed
+# Admin endpoints: enforce admin_required
 @app.route('/admin/dashboard')
-@login_required
+@admin_required
 def admin_dashboard():
     # Filters
     page = request.args.get('page', 1, type=int)
@@ -356,8 +503,8 @@ def admin_dashboard():
     pending_orders = Order.query.filter(Order.status == 'pending').count()
 
     # Today's revenue
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = datetime.utcnow().replace(hour=23, minute=59, second=59, microsecond=999999)
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59, microsecond=999999)
     today_revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
         Order.created_at >= today_start,
         Order.created_at <= today_end,
@@ -379,13 +526,13 @@ def admin_dashboard():
     )
 
 @app.route('/admin/logout')
-@login_required
+@admin_required
 def admin_logout():
     logout_user()
     return redirect(url_for('admin_login'))
 
 @app.route('/api/admin/orders')
-@login_required
+@admin_required
 def get_orders():
     """API endpoint for AJAX order fetching with real-time updates"""
     try:
@@ -440,7 +587,7 @@ def get_orders():
         pending_orders = Order.query.filter(Order.status == 'pending').count()
         
         # Check for new orders (orders created in last 30 seconds)
-        thirty_seconds_ago = datetime.utcnow() - timedelta(seconds=30)
+        thirty_seconds_ago = datetime.now(timezone.utc) - timedelta(seconds=30)
         new_orders_count = Order.query.filter(Order.created_at >= thirty_seconds_ago).count()
         
         return jsonify({
@@ -478,11 +625,16 @@ def get_orders():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Serve images from the project images directory to fix image display issues
+@app.route('/images/<path:filename>')
+def images(filename):
+    return send_from_directory(os.path.join(app.root_path, 'images'), filename)
+
 @app.route('/api/admin/orders/<int:order_id>')
-@login_required
+@admin_required
 def api_admin_order_detail(order_id):
     """API endpoint for fetching individual order details"""
-    order = Order.query.get(order_id)
+    order = db.session.get(Order, order_id)
     if not order:
         return jsonify({'error': 'Order not found'}), 404
     
@@ -502,26 +654,47 @@ def api_admin_order_detail(order_id):
         'created_at': order.created_at.isoformat()
     })
 
+@app.route('/api/admin/orders/<int:order_id>/edit', methods=['PUT'])
+@csrf.exempt
+@admin_required
+def edit_order(order_id):
+    order = db.session.get(Order, order_id)
+    if not order:
+        return jsonify({'error': 'Order not found'}), 404
+
+    return jsonify({
+        'id': order.id,
+        'order_id': order.order_id,
+        'customer_name': order.customer_name,
+        'customer_email': order.customer_email,
+        'customer_phone': order.customer_phone,
+        'shipping_address': order.shipping_address,
+        'pincode': order.pincode,
+        'quantity': order.quantity,
+        'unit_price': order.unit_price,
+        'total_amount': order.total_amount,
+        'status': order.status,
+        'updated_at': order.updated_at.isoformat(),
+    })
+
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['PUT'])
-@login_required
+@csrf.exempt
+@admin_required
 def update_order_status(order_id):
-    """API endpoint for updating order status"""
     try:
-        order = Order.query.get(order_id)
+        data = request.get_json() or {}
+        new_status = data.get('status')
+        if not new_status:
+            return jsonify({'error': 'Status is required'}), 400
+
+        order = db.session.get(Order, order_id)
         if not order:
             return jsonify({'error': 'Order not found'}), 404
-        
-        data = request.get_json()
-        new_status = data.get('status')
-        
-        if new_status not in ['pending', 'processing', 'shipped', 'delivered', 'cancelled']:
-            return jsonify({'error': 'Invalid status'}), 400
-        
+
         order.status = new_status
-        order.updated_at = datetime.utcnow()
-        
+        order.updated_at = datetime.now(timezone.utc)
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': 'Order status updated successfully',
@@ -531,34 +704,27 @@ def update_order_status(order_id):
                 'status': order.status
             }
         })
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/export-orders')
-@login_required
+@admin_required
 def export_orders():
     try:
         orders = Order.query.all()
-        
-        # Create CSV data
-        csv_data = "Order ID,Payment ID,Customer Name,Email,Phone,Address,Quantity,Total Amount,Payment Status,Delivery Status,Created At\n"
-        
+        # Create CSV data with correct fields
+        csv_data = "Order ID,Payment ID,Customer Name,Email,Phone,Address,Pincode,Quantity,Total Amount,Status,Created At\n"
         for order in orders:
-            csv_data += f"{order.order_id},{order.payment_id},{order.customer_name},{order.customer_email},{order.customer_phone},\"{order.customer_address}, {order.customer_pincode}\",{order.quantity},{order.total_amount},{order.payment_status},{order.delivery_status},{order.created_at}\n"
-        
-        # Create file-like object
+            csv_data += f"{order.order_id},{order.razorpay_payment_id},{order.customer_name},{order.customer_email},{order.customer_phone},\"{order.shipping_address}\",{order.pincode},{order.quantity},{order.total_amount},{order.status},{order.created_at}\n"
         output = io.StringIO()
         output.write(csv_data)
         output.seek(0)
-        
         return send_file(
             io.BytesIO(output.getvalue().encode()),
             as_attachment=True,
             download_name=f'orders_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
             mimetype='text/csv'
         )
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -568,13 +734,34 @@ def init_db():
         db.create_all()
         
         # Create admin user if not exists
-        admin = Admin.query.filter_by(username=os.getenv('ADMIN_USERNAME', 'admin')).first()
+        admin_username = (os.getenv('ADMIN_USERNAME', 'admin') or 'admin').strip().lower()
+        admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == admin_username).first()
         if not admin:
             admin = Admin(
-                username=os.getenv('ADMIN_USERNAME', 'admin'),
+                username=admin_username,
                 password_hash=generate_password_hash(os.getenv('ADMIN_PASSWORD', 'moringa@2024'))
             )
             db.session.add(admin)
+            db.session.commit()
+
+            # Ensure AdminSecurity row exists for the admin
+            sec = AdminSecurity.query.filter_by(admin_id=admin.id).first()
+            if not sec:
+                sec = AdminSecurity(admin_id=admin.id, mfa_enabled=False)
+                db.session.add(sec)
+                db.session.commit()
+        
+        # Ensure a demo customer exists for testing
+        demo_email = (os.getenv('DEMO_CUSTOMER_EMAIL', 'customer@example.com') or 'customer@example.com').strip().lower()
+        cust = Customer.query.filter_by(email=demo_email).first()
+        if not cust:
+            cust = Customer(
+                name='Demo Customer',
+                email=demo_email,
+                phone='9999999999',
+                password_hash=generate_password_hash(os.getenv('DEMO_CUSTOMER_PASSWORD', 'password123'))
+            )
+            db.session.add(cust)
             db.session.commit()
 
 @app.route('/api/payment-cancel', methods=['POST'])
@@ -598,7 +785,7 @@ def payment_cancel():
         # Only change pending orders to cancelled to avoid overriding successful payments
         if order.status == 'pending':
             order.status = 'cancelled'
-            order.updated_at = datetime.utcnow()
+            order.updated_at = datetime.now(timezone.utc)
             db.session.commit()
 
         return jsonify({'status': 'ok', 'order_status': order.status, 'message': reason})
@@ -607,4 +794,6 @@ def payment_cancel():
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.getenv('FLASK_RUN_PORT', '5001'))
+    host = os.getenv('FLASK_RUN_HOST', '0.0.0.0')
+    app.run(debug=True, host=host, port=port, use_reloader=False)

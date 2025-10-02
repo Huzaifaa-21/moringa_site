@@ -9,7 +9,7 @@
 </head>
 <body>
     <div class="login-container">
-        <form class="login-form" method="POST">
+        <form class="login-form" method="POST" action="{{ url_for('admin_login') }}">
             {{ form.hidden_tag() }}
             <h2><i class="fas fa-user-shield"></i> Admin Login</h2>
             
@@ -41,6 +41,19 @@
                 {% if form.password.errors %}
                     <div class="error-message">
                         {% for error in form.password.errors %}
+                            <span>{{ error }}</span>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            
+            <!-- Added OTP field to support MFA-enabled admins -->
+            <div class="form-group">
+                {{ form.otp.label(class="form-label") }}
+                {{ form.otp(class="form-control", placeholder="6-digit code (if MFA enabled)") }}
+                {% if form.otp.errors %}
+                    <div class="error-message">
+                        {% for error in form.otp.errors %}
                             <span>{{ error }}</span>
                         {% endfor %}
                     </div>
