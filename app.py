@@ -662,20 +662,56 @@ def edit_order(order_id):
     if not order:
         return jsonify({'error': 'Order not found'}), 404
 
-    return jsonify({
-        'id': order.id,
-        'order_id': order.order_id,
-        'customer_name': order.customer_name,
-        'customer_email': order.customer_email,
-        'customer_phone': order.customer_phone,
-        'shipping_address': order.shipping_address,
-        'pincode': order.pincode,
-        'quantity': order.quantity,
-        'unit_price': order.unit_price,
-        'total_amount': order.total_amount,
-        'status': order.status,
-        'updated_at': order.updated_at.isoformat(),
-    })
+    try:
+        data = request.get_json() or {}
+
+        # Update mutable fields if provided
+        if 'customer_name' in data and data['customer_name']:
+            order.customer_name = data['customer_name']
+        if 'customer_email' in data and data['customer_email']:
+            order.customer_email = data['customer_email']
+        if 'customer_phone' in data and data['customer_phone']:
+            order.customer_phone = data['customer_phone']
+        if 'shipping_address' in data and data['shipping_address']:
+            order.shipping_address = data['shipping_address']
+        if 'pincode' in data and data['pincode']:
+            order.pincode = data['pincode']
+        if 'quantity' in data and str(data['quantity']).strip():
+            try:
+                new_qty = int(data['quantity'])
+                if new_qty <= 0:
+                    return jsonify({'error': 'Quantity must be a positive integer'}), 400
+                order.quantity = new_qty
+                # Recalculate pricing based on new quantity
+                order.unit_price = PRODUCT_CONFIG['price_per_unit']
+                order.total_amount = calculate_total(new_qty)
+            except ValueError:
+                return jsonify({'error': 'Quantity must be an integer'}), 400
+
+        order.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Order updated successfully',
+            'order': {
+                'id': order.id,
+                'order_id': order.order_id,
+                'customer_name': order.customer_name,
+                'customer_email': order.customer_email,
+                'customer_phone': order.customer_phone,
+                'shipping_address': order.shipping_address,
+                'pincode': order.pincode,
+                'quantity': order.quantity,
+                'unit_price': float(order.unit_price),
+                'total_amount': float(order.total_amount),
+                'status': order.status,
+                'updated_at': order.updated_at.isoformat(),
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['PUT'])
 @csrf.exempt

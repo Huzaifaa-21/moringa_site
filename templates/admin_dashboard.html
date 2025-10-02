@@ -255,13 +255,107 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.4);
             z-index: 10000;
-            display: flex;
+            display: none; /* hidden by default, toggled to flex when shown */
             align-items: center;
             justify-content: center;
+            opacity: 0;
+            transition: opacity 300ms ease;
         }
-
+        .modal.show {
+            display: flex;
+            opacity: 1;
+        }
+        .modal .modal-content {
+            width: 92%;
+            max-width: 860px;
+            max-height: 80vh;
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            overflow-y: auto;
+            transform: translateY(20px);
+            opacity: 0;
+            transition: transform 300ms ease, opacity 300ms ease;
+        }
+        .modal.show .modal-content {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            background: #f9fafb;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+            color: #111827;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .order-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 8px 8px 16px;
+            margin: 8px 0;
+        }
+        .detail-section {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 22px 22px 18px;
+            overflow-wrap: anywhere;
+            box-shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
+        }
+        /* Align labels and values cleanly within rows */
+        .detail-section p {
+            display: grid;
+            grid-template-columns: 170px 1fr;
+            column-gap: 14px;
+            align-items: start;
+            margin: 10px 0;
+            padding-bottom: 6px;
+        }
+        .detail-section h4 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .order-detail-label {
+            color: #065f46; /* deeper green tone */
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .order-detail-value {
+            color: #111827;
+            font-weight: 600;
+            word-break: break-word;
+        }
+        .modal .btn.btn-sm.btn-secondary {
+            border: none;
+            background: #e5e7eb;
+            color: #374151;
+        }
+        .modal .btn.btn-sm.btn-secondary:hover {
+            background: #d1d5db;
+        }
+    </style>
+    <style>
         .modal-content {
             background: var(--white);
             border-radius: var(--border-radius);
@@ -371,7 +465,7 @@
                 button.innerHTML = '<i class="fas fa-play"></i> Auto Refresh';
                 button.classList.remove('active');
             } else {
-                refreshInterval = setInterval(refreshOrders, 30000); // Refresh every 30 seconds
+                refreshInterval = setInterval(refreshOrders, 5000); // Refresh every 5 seconds
                 isAutoRefreshEnabled = true;
                 button.innerHTML = '<i class="fas fa-pause"></i> Auto Refresh';
                 button.classList.add('active');
@@ -430,19 +524,19 @@
             orders.forEach(order => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-                    <td>
+                    <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                         <strong>${order.order_id}</strong>
-                        ${order.razorpay_payment_id ? `<br><small style="color: #666;">${order.razorpay_payment_id.substring(0, 20)}...</small>` : ''}
+                        ${order.razorpay_payment_id ? `<br><small style="color: #666; display:inline-block; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${order.razorpay_payment_id}</small>` : ''}
                     </td>
                     <td>
                         ${new Date(order.created_at).toLocaleDateString()}<br>
                         <small>${new Date(order.created_at).toLocaleTimeString()}</small>
                     </td>
-                    <td>
-                        <strong>${order.customer_name}</strong><br>
-                        <small>${order.customer_email}</small>
+                    <td style="max-width:240px; overflow:hidden;">
+                        <strong style="display:block; white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">${order.customer_name}</strong>
+                        <small style="display:block; white-space:nowrap; text-overflow:ellipsis; overflow:hidden; max-width:240px;">${order.customer_email}</small>
                     </td>
-                    <td>
+                    <td style="max-width:160px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                         ${order.customer_phone}<br>
                         <small>${order.pincode}</small>
                     </td>
@@ -524,37 +618,38 @@
                         showNotification(order.error, 'error');
                         return;
                     }
-                    
-                    document.getElementById('orderDetailsContent').innerHTML = `
+                    // Populate the correct container and open the correct modal
+                    document.getElementById('orderDetails').innerHTML = `
                         <div class="order-detail-grid">
                             <div class="detail-section">
                                 <h4><i class="fas fa-shopping-cart"></i> Order Information</h4>
-                                <p><strong>Order ID:</strong> ${order.order_id}</p>
-                                <p><strong>Date:</strong> ${new Date(order.created_at).toLocaleString()}</p>
-                                <p><strong>Status:</strong> <span class="status-badge status-${order.status}">${order.status.charAt(0).toUpperCase() + order.status.slice(1)}</span></p>
-                                <p><strong>Payment ID:</strong> ${order.razorpay_payment_id || 'N/A'}</p>
+                                <p><span class="order-detail-label">Order ID:</span> <span class="order-detail-value">${order.order_id}</span></p>
+                                <p><span class="order-detail-label">Date:</span> <span class="order-detail-value">${new Date(order.created_at).toLocaleString()}</span></p>
+                                <p><span class="order-detail-label">Status:</span> <span class="order-detail-value" style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px;"><span class="status-badge status-${order.status}" style="white-space:nowrap;">${order.status.charAt(0).toUpperCase() + order.status.slice(1)}</span></span></p>
+                                <p><span class="order-detail-label">Payment ID:</span> <span class="order-detail-value" style="word-break:break-all;">${order.razorpay_payment_id || 'N/A'}</span></p>
                             </div>
-                            
                             <div class="detail-section">
                                 <h4><i class="fas fa-user"></i> Customer Details</h4>
-                                <p><strong>Name:</strong> ${order.customer_name}</p>
-                                <p><strong>Email:</strong> ${order.customer_email}</p>
-                                <p><strong>Phone:</strong> ${order.customer_phone}</p>
-                                <p><strong>Address:</strong> ${order.shipping_address}</p>
-                                <p><strong>Pincode:</strong> ${order.pincode}</p>
+                                <p><span class="order-detail-label">Name:</span> <span class="order-detail-value">${order.customer_name}</span></p>
+                                <p><span class="order-detail-label">Email:</span> <span class="order-detail-value">${order.customer_email}</span></p>
+                                <p><span class="order-detail-label">Phone:</span> <span class="order-detail-value">${order.customer_phone}</span></p>
+                                <p><span class="order-detail-label">Address:</span> <span class="order-detail-value">${order.shipping_address}</span></p>
+                                <p><span class="order-detail-label">Pincode:</span> <span class="order-detail-value">${order.pincode}</span></p>
                             </div>
-                            
                             <div class="detail-section">
                                 <h4><i class="fas fa-box"></i> Order Details</h4>
-                                <p><strong>Product:</strong> Moringa Powder (200g pouch)</p>
-                                <p><strong>Quantity:</strong> ${order.quantity} pouches</p>
-                                <p><strong>Unit Price:</strong> ₹${order.unit_price.toFixed(2)}</p>
-                                <p><strong>Total Amount:</strong> ₹${order.total_amount.toFixed(2)}</p>
+                                <p><span class="order-detail-label">Product:</span> <span class="order-detail-value">Moringa Powder (200g pouch)</span></p>
+                                <p><span class="order-detail-label">Quantity:</span> <span class="order-detail-value">${order.quantity} pouches</span></p>
+                                <p><span class="order-detail-label">Unit Price:</span> <span class="order-detail-value">₹${order.unit_price.toFixed(2)}</span></p>
+                                <p><span class="order-detail-label">Total Amount:</span> <span class="order-detail-value">₹${order.total_amount.toFixed(2)}</span></p>
                             </div>
                         </div>
                     `;
-                    
-                    document.getElementById('orderDetailsModal').style.display = 'block';
+                    const modalEl = document.getElementById('orderModal');
+                    modalEl.style.display = 'flex';
+                    requestAnimationFrame(() => {
+                        modalEl.classList.add('show');
+                    });
                 })
                 .catch(error => {
                     console.error('Error fetching order details:', error);
@@ -563,31 +658,37 @@
         }
 
         function closeModal() {
-            document.getElementById('orderModal').style.display = 'none';
+            const modalEl = document.getElementById('orderModal');
+            modalEl.classList.remove('show');
+            setTimeout(() => { modalEl.style.display = 'none'; }, 300);
         }
 
         function updateStatus(orderId) {
             document.getElementById('statusOrderId').value = orderId;
-            document.getElementById('statusModal').style.display = 'flex';
+            const modalEl = document.getElementById('statusModal');
+            modalEl.style.display = 'flex';
+            requestAnimationFrame(() => {
+                modalEl.classList.add('show');
+            });
         }
 
         function closeStatusModal() {
-            document.getElementById('statusModal').style.display = 'none';
+            const modalEl = document.getElementById('statusModal');
+            modalEl.classList.remove('show');
+            setTimeout(() => { modalEl.style.display = 'none'; }, 300);
             document.getElementById('statusForm').reset();
         }
 
         document.getElementById('statusForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            
             const formData = new FormData(this);
+            const orderId = formData.get('order_id');
             const data = {
-                order_id: formData.get('order_id'),
                 status: formData.get('status'),
                 notes: formData.get('notes')
             };
-            
-            fetch('/admin/update-status', {
-                method: 'POST',
+            fetch(`/api/admin/orders/${orderId}/status`, {
+                method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -612,7 +713,8 @@
         // Close modals when clicking outside
         document.addEventListener('click', function(e) {
             if (e.target.classList.contains('modal')) {
-                e.target.style.display = 'none';
+                e.target.classList.remove('show');
+                setTimeout(() => { e.target.style.display = 'none'; }, 300);
             }
         });
 
