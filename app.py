@@ -273,31 +273,110 @@ def generate_receipt(order_id):
         return jsonify({'error': str(e)}), 500
 
 # Admin Routes
+# Admin Login Form
+class AdminLoginForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    remember_me = BooleanField('Remember me')
+    submit = SubmitField('Login')
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
-    if request.method == 'POST':
-        data = request.json if request.is_json else request.form
+    form = AdminLoginForm()
+
+    # JSON-based login (AJAX)
+    if request.method == 'POST' and request.is_json:
+        data = request.get_json()
         username = data.get('username')
         password = data.get('password')
-        
         admin = Admin.query.filter_by(username=username).first()
-        
         if admin and check_password_hash(admin.password_hash, password):
             login_user(admin)
-            if request.is_json:
-                return jsonify({'status': 'success', 'redirect': '/admin/dashboard'})
+            return jsonify({'status': 'success', 'redirect': '/admin/dashboard'})
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    # Standard form login
+    if request.method == 'POST' and form.validate_on_submit():
+        admin = Admin.query.filter_by(username=form.username.data).first()
+        if admin and check_password_hash(admin.password_hash, form.password.data):
+            login_user(admin, remember=form.remember_me.data)
             return redirect(url_for('admin_dashboard'))
-        
-        if request.is_json:
-            return jsonify({'error': 'Invalid credentials'}), 401
-        return render_template('admin_login.html', error='Invalid credentials')
-    
-    return render_template('admin_login.html')
+        flash('Invalid credentials', 'error')
+
+    return render_template('admin_login.html', form=form)
 
 @app.route('/admin/dashboard')
 @login_required
 def admin_dashboard():
-    return render_template('admin_dashboard.html')
+    # Filters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    status_filter = request.args.get('status')
+    search = request.args.get('search')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+
+    query = Order.query
+
+    if status_filter:
+        query = query.filter(Order.status == status_filter)
+
+    if search:
+        query = query.filter(
+            db.or_(
+                Order.order_id.contains(search),
+                Order.customer_name.contains(search),
+                Order.customer_email.contains(search),
+                Order.customer_phone.contains(search)
+            )
+        )
+
+    if date_from:
+        try:
+            from_date = datetime.strptime(date_from, '%Y-%m-%d')
+            query = query.filter(Order.created_at >= from_date)
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            to_date = datetime.strptime(date_to, '%Y-%m-%d')
+            to_date = to_date.replace(hour=23, minute=59, second=59)
+            query = query.filter(Order.created_at <= to_date)
+        except ValueError:
+            pass
+
+    orders_paginated = query.order_by(Order.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+
+    # Stats
+    total_orders = Order.query.count()
+    total_revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
+        Order.status.in_(['processing', 'shipped', 'delivered'])
+    ).scalar() or 0
+    pending_orders = Order.query.filter(Order.status == 'pending').count()
+
+    # Today's revenue
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = datetime.utcnow().replace(hour=23, minute=59, second=59, microsecond=999999)
+    today_revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
+        Order.created_at >= today_start,
+        Order.created_at <= today_end,
+        Order.status.in_(['processing', 'shipped', 'delivered'])
+    ).scalar() or 0
+
+    stats = {
+        'total_orders': total_orders,
+        'total_revenue': float(total_revenue),
+        'pending_orders': pending_orders,
+        'today_revenue': float(today_revenue)
+    }
+
+    return render_template(
+        'admin_dashboard.html',
+        stats=stats,
+        orders=orders_paginated.items,
+        pagination=orders_paginated
+    )
 
 @app.route('/admin/logout')
 @login_required
@@ -497,6 +576,34 @@ def init_db():
             )
             db.session.add(admin)
             db.session.commit()
+
+@app.route('/api/payment-cancel', methods=['POST'])
+def payment_cancel():
+    """Mark order as cancelled when payment is dismissed/failed."""
+    try:
+        data = request.get_json() or {}
+        razorpay_order_id = data.get('razorpay_order_id')
+        order_id = data.get('order_id')
+        reason = data.get('reason', 'Payment cancelled by user')
+
+        order = None
+        if razorpay_order_id:
+            order = Order.query.filter_by(razorpay_order_id=razorpay_order_id).first()
+        if not order and order_id:
+            order = Order.query.filter_by(order_id=order_id).first()
+
+        if not order:
+            return jsonify({'error': 'Order not found'}), 404
+
+        # Only change pending orders to cancelled to avoid overriding successful payments
+        if order.status == 'pending':
+            order.status = 'cancelled'
+            order.updated_at = datetime.utcnow()
+            db.session.commit()
+
+        return jsonify({'status': 'ok', 'order_status': order.status, 'message': reason})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     init_db()

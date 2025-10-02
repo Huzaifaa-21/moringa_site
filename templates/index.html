@@ -366,6 +366,27 @@
             const menuToggle = document.querySelector('.menu-toggle');
             const nav = document.getElementById('nav');
             
+            // Notification helper
+            function showNotification(message, type = 'info') {
+                const container = document.getElementById('notification-container');
+                if (!container) return;
+                const note = document.createElement('div');
+                note.className = `notification ${type}`;
+                note.textContent = message;
+                container.appendChild(note);
+                // Animate in
+                requestAnimationFrame(() => note.classList.add('show'));
+                // Auto dismiss
+                setTimeout(() => {
+                    note.classList.remove('show');
+                    setTimeout(() => {
+                        if (note.parentNode === container) {
+                            container.removeChild(note);
+                        }
+                    }, 300);
+                }, 3000);
+            }
+            
             // Toggle mobile menu
             menuToggle.addEventListener('click', function() {
                 nav.classList.toggle('active');
@@ -459,96 +480,75 @@
                             color: '#2e7d32'
                         },
                         handler: function(response) {
-                            verifyPayment(response, formData);
+                            // Inline payment verification to avoid undefined function
+                            fetch('/api/verify-payment', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    razorpay_order_id: options.order_id,
+                                    razorpay_payment_id: response.razorpay_payment_id,
+                                    razorpay_signature: response.razorpay_signature
+                                })
+                            })
+                            .then(res => res.json())
+                            .then(result => {
+                                if (result.status === 'success') {
+                                    showNotification('Payment successful! Generating receipt...', 'success');
+                                    // Re-enable submit button
+                                    submitBtn.innerHTML = originalText;
+                                    submitBtn.disabled = false;
+                                    // Open receipt in new tab
+                                    window.open(`/api/generate-receipt/${result.order_id}`, '_blank');
+                                } else {
+                                    showNotification(result.error || 'Payment verification failed', 'error');
+                                    submitBtn.innerHTML = originalText;
+                                    submitBtn.disabled = false;
+                                }
+                            })
+                            .catch(err => {
+                                showNotification('Payment verification failed: ' + err.message, 'error');
+                                submitBtn.innerHTML = originalText;
+                                submitBtn.disabled = false;
+                            });
                         },
                         modal: {
                             ondismiss: function() {
                                 submitBtn.innerHTML = originalText;
                                 submitBtn.disabled = false;
                                 showNotification('Payment cancelled', 'error');
+                                try {
+                                    fetch('/api/payment-cancel', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({
+                                            razorpay_order_id: options.order_id,
+                                            reason: 'Razorpay modal dismissed'
+                                        })
+                                    }).catch(() => {});
+                                } catch (e) {}
                             }
                         }
                     };
-                    
+
+                    // Launch Razorpay Checkout and capture failure events
                     const rzp = new Razorpay(options);
+                    rzp.on('payment.failed', function (response) {
+                        showNotification('Payment failed: ' + (response.error && response.error.description || 'Unknown error'), 'error');
+                        try {
+                            fetch('/api/payment-cancel', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    razorpay_order_id: options.order_id,
+                                    reason: 'Payment failed: ' + (response.error && response.error.description || 'Unknown error')
+                                })
+                            }).catch(() => {});
+                        } catch (e) {}
+                        submitBtn.innerHTML = originalText;
+                        submitBtn.disabled = false;
+                    });
                     rzp.open();
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showNotification('Error creating order: ' + error.message, 'error');
-                    submitBtn.innerHTML = originalText;
-                    submitBtn.disabled = false;
-                });
-            });
-            
-            // Verify payment
-            function verifyPayment(response, orderData) {
-                fetch('/api/verify-payment', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        razorpay_order_id: response.razorpay_order_id,
-                        razorpay_payment_id: response.razorpay_payment_id,
-                        razorpay_signature: response.razorpay_signature,
-                        receipt: orderData.receipt || response.razorpay_order_id
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        showNotification('Payment successful! Your order has been placed.', 'success');
-                        document.getElementById('order-form').reset();
-                        updateTotal();
-                        
-                        // Generate receipt
-                        window.open(`/api/generate-receipt/${data.order_id}`, '_blank');
-                    } else {
-                        throw new Error(data.error || 'Payment verification failed');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showNotification('Payment verification failed: ' + error.message, 'error');
-                })
-                .finally(() => {
-                    const submitBtn = document.querySelector('#order-form button[type="submit"]');
-                    submitBtn.innerHTML = '<i class="fas fa-credit-card"></i> Pay with Razorpay';
-                    submitBtn.disabled = false;
-                });
-            }
-            
-            // Show notification
-            function showNotification(message, type) {
-                const container = document.getElementById('notification-container');
-                const notification = document.createElement('div');
-                notification.className = `notification ${type}`;
-                notification.innerHTML = `
-                    <span>${message}</span>
-                    <button onclick="this.parentElement.remove()">×</button>
-                `;
-                
-                container.appendChild(notification);
-                
-                // Auto remove after 5 seconds
-                setTimeout(() => {
-                    if (notification.parentElement) {
-                        notification.remove();
-                    }
-                }, 5000);
-            }
-            
-            // Make showNotification global
-            window.showNotification = showNotification;
-            
-            // Contact form submission
-            document.getElementById('contact-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                showNotification('Message sent! We will get back to you soon.', 'success');
-                this.reset();
-            });
-        });
+                }); // end fetch .then(data => { ... })
+            }); // end submit handler
+        }); // end DOMContentLoaded
     </script>
-</body>
-</html>
