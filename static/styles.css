@@ -878,3 +878,90 @@ tr:hover {
         gap: 30px;
     }
 }
+/* Accessible Focus Styles */
+.btn:focus,
+.btn:focus-visible,
+.nav-link:focus,
+.nav-link:focus-visible,
+.menu-toggle:focus,
+.menu-toggle:focus-visible,
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: 3px solid #1b5e20; /* dark green for contrast */
+    outline-offset: 2px;
+}
+
+/* Order Form Redesign */
+.product-content {
+    text-align: left;
+}
+
+#order-form {
+    margin-top: 20px;
+}
+
+#order-form .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    #order-form .form-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+#order-form .form-section {
+    background: var(--white);
+    border: 1px solid #e5e7eb;
+    border-radius: var(--border-radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+}
+
+#order-form .section-heading {
+    font-size: 1.2rem;
+    color: var(--primary-color);
+    margin-bottom: 12px;
+}
+
+/* Improve button visibility */
+.btn {
+    background-color: var(--primary-color);
+    color: var(--white);
+    padding: 12px 20px;
+    border-radius: var(--border-radius);
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn:hover {
+    background-color: #256b27;
+}
+
+/* Navigation link focus contrast */
+.nav-link {
+    border-radius: 6px;
+}
+
+.nav-link:focus-visible {
+    box-shadow: 0 0 0 3px rgba(30, 95, 32, 0.5);
+}
+
+/* Total amount emphasis */
+.total-amount {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+/* Shipping info icons spacing */
+.shipping-info p i {
+    margin-right: 10px;
+}

@@ -6,6 +6,7 @@ from wtforms import StringField, PasswordField, BooleanField, SubmitField
 from wtforms.validators import DataRequired, Email
 import razorpay
 import os
+import re
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -21,6 +22,7 @@ from flask_wtf.csrf import CSRFProtect
 from functools import wraps
 import secrets
 import pyotp
+from services.analytics import get_revenue_timeseries
 
 # Load environment variables
 load_dotenv()
@@ -122,21 +124,69 @@ def generate_order_id():
 # Routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html', PLAUSIBLE_DOMAIN=os.getenv('PLAUSIBLE_DOMAIN')))
+    try:
+        from flask_wtf.csrf import generate_csrf
+        token = generate_csrf()
+        resp.set_cookie('csrf_token', token, samesite='Lax', secure=False)
+    except Exception:
+        pass
+    return resp
+
+# Lightweight CSRF check for JSON APIs using cookie/header token
+def _check_csrf_json():
+    token = request.headers.get('X-CSRFToken') or request.headers.get('X-CSRF-Token')
+    cookie = request.cookies.get('csrf_token')
+    return bool(token and cookie and token == cookie)
 
 @app.route('/api/create-order', methods=['POST'])
 def create_order():
     try:
-        data = request.get_json()
+        if not _check_csrf_json():
+            return jsonify({'error': 'Invalid CSRF token'}), 400
+        data = request.get_json() or {}
         
-        # Validate required fields
+        # Sanitize inputs
+        def sanitize_string(s, max_len=500):
+            if not isinstance(s, str):
+                return ''
+            s = s.strip()
+            return s[:max_len]
+        
+        def validate_phone(phone):
+            return bool(re.fullmatch(r"\d{10}", phone or ''))
+        
+        def validate_pincode(pin):
+            return bool(re.fullmatch(r"\d{6}", pin or ''))
+        
+        def validate_email_format(email):
+            return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email or ''))
+        
         required_fields = ['name', 'email', 'phone', 'address', 'pincode', 'quantity']
         for field in required_fields:
             if not data.get(field):
                 return jsonify({'error': f'{field} is required'}), 400
         
+        name = sanitize_string(data.get('name'), 100)
+        email = sanitize_string(data.get('email'), 100)
+        phone = sanitize_string(data.get('phone'), 20)
+        address = sanitize_string(data.get('address'), 1000)
+        pincode = sanitize_string(data.get('pincode'), 10)
+        
+        if not validate_email_format(email):
+            return jsonify({'error': 'Invalid email format'}), 400
+        if not validate_phone(phone):
+            return jsonify({'error': 'Phone must be 10 digits'}), 400
+        if not validate_pincode(pincode):
+            return jsonify({'error': 'Pincode must be 6 digits'}), 400
+        
         # Calculate total amount
-        quantity = int(data['quantity'])
+        try:
+            quantity = int(str(data['quantity']).strip())
+            if quantity <= 0:
+                return jsonify({'error': 'Quantity must be a positive integer'}), 400
+        except ValueError:
+            return jsonify({'error': 'Quantity must be a valid integer'}), 400
         total_amount = calculate_total(quantity)
         
         # Generate unique order ID
@@ -154,11 +204,11 @@ def create_order():
         order = Order(
             order_id=order_id,
             razorpay_order_id=razorpay_order['id'],
-            customer_name=data['name'],
-            customer_email=data['email'],
-            customer_phone=data['phone'],
-            shipping_address=data['address'],
-            pincode=data['pincode'],
+            customer_name=name,
+            customer_email=email,
+            customer_phone=phone,
+            shipping_address=address,
+            pincode=pincode,
             quantity=quantity,
             unit_price=PRODUCT_CONFIG['price_per_unit'],
             total_amount=total_amount
@@ -171,22 +221,23 @@ def create_order():
             'key': os.getenv('RAZORPAY_KEY_ID'),
             'amount': total_amount,
             'currency': 'INR',
-            'order_id': razorpay_order['id'],
             'name': 'Pure Moringa',
-            'description': f'Moringa Powder - {quantity} pouches',
+            'description': f"Order {order_id}",
+            'order_id': razorpay_order['id'],
             'prefill': {
-                'name': data['name'],
-                'email': data['email'],
-                'contact': data['phone']
+                'name': name,
+                'email': email,
+                'contact': phone
             }
         })
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/verify-payment', methods=['POST'])
 def verify_payment():
     try:
+        if not _check_csrf_json():
+            return jsonify({'error': 'Invalid CSRF token'}), 400
         data = request.get_json()
         
         # Verify signature
@@ -415,7 +466,7 @@ def customer_login():
                 session['customer_id'] = customer.id
                 flash('Logged in successfully.', 'success')
                 app.logger.info(f"Customer '{email_input}' logged in successfully")
-                return redirect(url_for('customer_dashboard'))
+                return redirect(url_for('index'))
             # Keep generic error for security, but log specifics
             if not customer:
                 app.logger.warning(f"Customer login failed: account not found for '{email_input}'")
@@ -443,256 +494,258 @@ def customer_logout():
 @customer_login_required
 def customer_dashboard():
     customer_id = session.get('customer_id')
-    customer = db.session.get(Customer, customer_id)
-    if not customer:
-        flash('Please log in to continue.', 'error')
-        return redirect(url_for('customer_login'))
+    customer = Customer.query.get_or_404(customer_id)
     orders = Order.query.filter_by(customer_email=customer.email).order_by(Order.created_at.desc()).all()
     return render_template('customer_dashboard.html', customer=customer, orders=orders)
 
-# Duplicate admin login block removed
-# Admin endpoints: enforce admin_required
 @app.route('/admin/dashboard')
 @admin_required
 def admin_dashboard():
-    # Filters
+    # Get filter parameters from request
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
-    status_filter = request.args.get('status')
-    search = request.args.get('search')
+    status_filter = request.args.get('status', '')
+    search_query = request.args.get('search', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-
-    query = Order.query
-
+    
+    # Build query for orders
+    orders_query = Order.query
+    
+    # Apply status filter
     if status_filter:
-        query = query.filter(Order.status == status_filter)
-
-    if search:
-        query = query.filter(
-            db.or_(
-                Order.order_id.contains(search),
-                Order.customer_name.contains(search),
-                Order.customer_email.contains(search),
-                Order.customer_phone.contains(search)
+        orders_query = orders_query.filter(Order.status == status_filter)
+    
+    # Apply search filter
+    if search_query:
+        search_pattern = f"%{search_query}%"
+        orders_query = orders_query.filter(
+            or_(
+                Order.order_id.ilike(search_pattern),
+                Order.customer_name.ilike(search_pattern),
+                Order.customer_email.ilike(search_pattern),
+                Order.customer_phone.ilike(search_pattern)
             )
         )
-
+    
+    # Apply date filters
     if date_from:
         try:
             from_date = datetime.strptime(date_from, '%Y-%m-%d')
-            query = query.filter(Order.created_at >= from_date)
+            orders_query = orders_query.filter(Order.created_at >= from_date)
         except ValueError:
             pass
-
+    
     if date_to:
         try:
             to_date = datetime.strptime(date_to, '%Y-%m-%d')
             to_date = to_date.replace(hour=23, minute=59, second=59)
-            query = query.filter(Order.created_at <= to_date)
+            orders_query = orders_query.filter(Order.created_at <= to_date)
         except ValueError:
             pass
-
-    orders_paginated = query.order_by(Order.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
-
-    # Stats
+    
+    # Order by creation date (newest first)
+    orders_query = orders_query.order_by(Order.created_at.desc())
+    
+    # Paginate orders
+    pagination = orders_query.paginate(
+        page=page, 
+        per_page=per_page, 
+        error_out=False
+    )
+    
+    # Get order statistics
     total_orders = Order.query.count()
+    pending_orders = Order.query.filter_by(status='pending').count()
+    processing_orders = Order.query.filter_by(status='processing').count()
+    shipped_orders = Order.query.filter_by(status='shipped').count()
+    delivered_orders = Order.query.filter_by(status='delivered').count()
+    cancelled_orders = Order.query.filter_by(status='cancelled').count()
+    
+    # Calculate total revenue (only from paid orders)
+    paid_statuses = ['processing', 'shipped', 'delivered']
     total_revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
-        Order.status.in_(['processing', 'shipped', 'delivered'])
+        Order.status.in_(paid_statuses)
     ).scalar() or 0
-    pending_orders = Order.query.filter(Order.status == 'pending').count()
-
-    # Today's revenue
+    
+    # Calculate today's revenue
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59, microsecond=999999)
     today_revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
+        Order.status.in_(paid_statuses),
         Order.created_at >= today_start,
-        Order.created_at <= today_end,
-        Order.status.in_(['processing', 'shipped', 'delivered'])
+        Order.created_at <= today_end
     ).scalar() or 0
-
+    
+    # Create stats dictionary for template
     stats = {
         'total_orders': total_orders,
         'total_revenue': float(total_revenue),
         'pending_orders': pending_orders,
         'today_revenue': float(today_revenue)
     }
-
-    return render_template(
-        'admin_dashboard.html',
-        stats=stats,
-        orders=orders_paginated.items,
-        pagination=orders_paginated
-    )
+    
+    # Get monthly revenue data for the last 12 months
+    monthly_revenue = []
+    for i in range(12):
+        month_start = datetime.now(timezone.utc).replace(day=1) - timedelta(days=30*i)
+        month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        
+        revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
+            Order.status.in_(paid_statuses),
+            Order.created_at >= month_start,
+            Order.created_at <= month_end
+        ).scalar() or 0
+        
+        monthly_revenue.append({
+            'month': month_start.strftime('%b %Y'),
+            'revenue': float(revenue)
+        })
+    
+    monthly_revenue.reverse()  # Show oldest to newest
+    
+    return render_template('admin_dashboard.html', 
+                         stats=stats,
+                         pagination=pagination,
+                         orders=pagination.items,
+                         monthly_revenue=monthly_revenue)
 
 @app.route('/admin/logout')
 @admin_required
 def admin_logout():
     logout_user()
+    flash('You have been logged out.', 'success')
     return redirect(url_for('admin_login'))
 
 @app.route('/api/admin/orders')
 @admin_required
 def get_orders():
-    """API endpoint for AJAX order fetching with real-time updates"""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
-        status_filter = request.args.get('status')
-        search = request.args.get('search')
-        date_from = request.args.get('date_from', '')
-        date_to = request.args.get('date_to', '')
+        status_filter = request.args.get('status', '')
+        search_query = request.args.get('search', '')
         
+        # Build query
         query = Order.query
         
-        # Apply filters
+        # Apply status filter
         if status_filter:
             query = query.filter(Order.status == status_filter)
         
-        if search:
+        # Apply search filter
+        if search_query:
+            search_pattern = f"%{search_query}%"
             query = query.filter(
                 db.or_(
-                    Order.order_id.contains(search),
-                    Order.customer_name.contains(search),
-                    Order.customer_email.contains(search),
-                    Order.customer_phone.contains(search)
+                    Order.order_id.ilike(search_pattern),
+                    Order.customer_name.ilike(search_pattern),
+                    Order.customer_email.ilike(search_pattern),
+                    Order.customer_phone.ilike(search_pattern)
                 )
             )
         
-        if date_from:
-            try:
-                from_date = datetime.strptime(date_from, '%Y-%m-%d')
-                query = query.filter(Order.created_at >= from_date)
-            except ValueError:
-                pass
+        # Order by creation date (newest first)
+        query = query.order_by(Order.created_at.desc())
         
-        if date_to:
-            try:
-                to_date = datetime.strptime(date_to, '%Y-%m-%d')
-                to_date = to_date.replace(hour=23, minute=59, second=59)
-                query = query.filter(Order.created_at <= to_date)
-            except ValueError:
-                pass
-        
-        # Pagination
-        orders = query.order_by(Order.created_at.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
+        # Paginate
+        pagination = query.paginate(
+            page=page, 
+            per_page=per_page, 
+            error_out=False
         )
         
-        # Calculate statistics
-        total_orders = Order.query.count()
-        total_revenue = db.session.query(db.func.sum(Order.total_amount)).filter(
-            Order.status.in_(['processing', 'shipped', 'delivered'])
-        ).scalar() or 0
-        pending_orders = Order.query.filter(Order.status == 'pending').count()
-        
-        # Check for new orders (orders created in last 30 seconds)
-        thirty_seconds_ago = datetime.now(timezone.utc) - timedelta(seconds=30)
-        new_orders_count = Order.query.filter(Order.created_at >= thirty_seconds_ago).count()
-        
-        return jsonify({
-            'orders': [{
+        orders = []
+        for order in pagination.items:
+            orders.append({
                 'id': order.id,
                 'order_id': order.order_id,
-                'razorpay_payment_id': order.razorpay_payment_id,
                 'customer_name': order.customer_name,
                 'customer_email': order.customer_email,
                 'customer_phone': order.customer_phone,
-                'shipping_address': order.shipping_address,
-                'pincode': order.pincode,
                 'quantity': order.quantity,
                 'total_amount': order.total_amount,
                 'status': order.status,
                 'created_at': order.created_at.isoformat(),
-                'updated_at': order.updated_at.isoformat()
-            } for order in orders.items],
-            'stats': {
-                'total_orders': total_orders,
-                'total_revenue': float(total_revenue),
-                'pending_orders': pending_orders
-            },
+                'payment_date': order.payment_date.isoformat() if order.payment_date else None,
+                'razorpay_payment_id': order.razorpay_payment_id
+            })
+        
+        return jsonify({
+            'orders': orders,
             'pagination': {
-                'page': orders.page,
-                'pages': orders.pages,
-                'per_page': orders.per_page,
-                'total': orders.total,
-                'has_prev': orders.has_prev,
-                'has_next': orders.has_next
-            },
-            'new_orders_count': new_orders_count
+                'page': pagination.page,
+                'pages': pagination.pages,
+                'per_page': pagination.per_page,
+                'total': pagination.total,
+                'has_next': pagination.has_next,
+                'has_prev': pagination.has_prev
+            }
         })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Serve images from the project images directory to fix image display issues
 @app.route('/images/<path:filename>')
 def images(filename):
-    return send_from_directory(os.path.join(app.root_path, 'images'), filename)
+    return send_from_directory('images', filename)
 
 @app.route('/api/admin/orders/<int:order_id>')
 @admin_required
 def api_admin_order_detail(order_id):
-    """API endpoint for fetching individual order details"""
-    order = db.session.get(Order, order_id)
-    if not order:
-        return jsonify({'error': 'Order not found'}), 404
-    
-    return jsonify({
-        'id': order.id,
-        'order_id': order.order_id,
-        'customer_name': order.customer_name,
-        'customer_email': order.customer_email,
-        'customer_phone': order.customer_phone,
-        'shipping_address': order.shipping_address,
-        'pincode': order.pincode,
-        'quantity': order.quantity,
-        'unit_price': float(order.unit_price),
-        'total_amount': float(order.total_amount),
-        'status': order.status,
-        'razorpay_payment_id': order.razorpay_payment_id,
-        'created_at': order.created_at.isoformat()
-    })
+    try:
+        order = Order.query.get_or_404(order_id)
+        return jsonify({
+            'id': order.id,
+            'order_id': order.order_id,
+            'customer_name': order.customer_name,
+            'customer_email': order.customer_email,
+            'customer_phone': order.customer_phone,
+            'shipping_address': order.shipping_address,
+            'pincode': order.pincode,
+            'quantity': order.quantity,
+            'unit_price': order.unit_price,
+            'total_amount': order.total_amount,
+            'status': order.status,
+            'created_at': order.created_at.isoformat(),
+            'payment_date': order.payment_date.isoformat() if order.payment_date else None,
+            'razorpay_order_id': order.razorpay_order_id,
+            'razorpay_payment_id': order.razorpay_payment_id
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/edit', methods=['PUT'])
 @csrf.exempt
 @admin_required
 def edit_order(order_id):
-    order = db.session.get(Order, order_id)
-    if not order:
-        return jsonify({'error': 'Order not found'}), 404
-
     try:
-        data = request.get_json() or {}
-
-        # Update mutable fields if provided
-        if 'customer_name' in data and data['customer_name']:
+        order = Order.query.get_or_404(order_id)
+        data = request.get_json()
+        
+        # Update allowed fields
+        if 'customer_name' in data:
             order.customer_name = data['customer_name']
-        if 'customer_email' in data and data['customer_email']:
+        if 'customer_email' in data:
             order.customer_email = data['customer_email']
-        if 'customer_phone' in data and data['customer_phone']:
+        if 'customer_phone' in data:
             order.customer_phone = data['customer_phone']
-        if 'shipping_address' in data and data['shipping_address']:
+        if 'shipping_address' in data:
             order.shipping_address = data['shipping_address']
-        if 'pincode' in data and data['pincode']:
+        if 'pincode' in data:
             order.pincode = data['pincode']
-        if 'quantity' in data and str(data['quantity']).strip():
-            try:
-                new_qty = int(data['quantity'])
-                if new_qty <= 0:
-                    return jsonify({'error': 'Quantity must be a positive integer'}), 400
-                order.quantity = new_qty
-                # Recalculate pricing based on new quantity
-                order.unit_price = PRODUCT_CONFIG['price_per_unit']
-                order.total_amount = calculate_total(new_qty)
-            except ValueError:
-                return jsonify({'error': 'Quantity must be an integer'}), 400
-
+        if 'quantity' in data:
+            new_quantity = int(data['quantity'])
+            if new_quantity > 0:
+                order.quantity = new_quantity
+                # Recalculate total amount
+                order.total_amount = calculate_total(new_quantity)
+        
         order.updated_at = datetime.now(timezone.utc)
         db.session.commit()
-
+        
         return jsonify({
-            'success': True,
+            'status': 'success',
             'message': 'Order updated successfully',
             'order': {
                 'id': order.id,
@@ -703,14 +756,13 @@ def edit_order(order_id):
                 'shipping_address': order.shipping_address,
                 'pincode': order.pincode,
                 'quantity': order.quantity,
-                'unit_price': float(order.unit_price),
-                'total_amount': float(order.total_amount),
+                'total_amount': order.total_amount,
                 'status': order.status,
-                'updated_at': order.updated_at.isoformat(),
+                'updated_at': order.updated_at.isoformat()
             }
         })
+        
     except Exception as e:
-        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['PUT'])
@@ -718,28 +770,46 @@ def edit_order(order_id):
 @admin_required
 def update_order_status(order_id):
     try:
-        data = request.get_json() or {}
+        order = Order.query.get_or_404(order_id)
+        data = request.get_json()
+        
         new_status = data.get('status')
-        if not new_status:
-            return jsonify({'error': 'Status is required'}), 400
-
-        order = db.session.get(Order, order_id)
-        if not order:
-            return jsonify({'error': 'Order not found'}), 404
-
+        known_statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
+        
+        if new_status not in known_statuses:
+            return jsonify({'error': 'Invalid status'}), 400
+        
         order.status = new_status
         order.updated_at = datetime.now(timezone.utc)
         db.session.commit()
-
+        
         return jsonify({
-            'success': True,
-            'message': 'Order status updated successfully',
+            'status': 'success',
+            'message': f'Order status updated to {new_status}',
             'order': {
                 'id': order.id,
-                'order_id': order.order_id,
-                'status': order.status
+                'status': order.status,
+                'updated_at': order.updated_at.isoformat()
             }
         })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/orders/<int:order_id>/delete', methods=['DELETE'])
+@csrf.exempt
+@admin_required
+def delete_order(order_id):
+    try:
+        order = Order.query.get_or_404(order_id)
+        db.session.delete(order)
+        db.session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Order deleted successfully'
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -747,89 +817,221 @@ def update_order_status(order_id):
 @admin_required
 def export_orders():
     try:
-        orders = Order.query.all()
-        # Create CSV data with correct fields
-        csv_data = "Order ID,Payment ID,Customer Name,Email,Phone,Address,Pincode,Quantity,Total Amount,Status,Created At\n"
-        for order in orders:
-            csv_data += f"{order.order_id},{order.razorpay_payment_id},{order.customer_name},{order.customer_email},{order.customer_phone},\"{order.shipping_address}\",{order.pincode},{order.quantity},{order.total_amount},{order.status},{order.created_at}\n"
+        # Get all orders
+        orders = Order.query.order_by(Order.created_at.desc()).all()
+        
+        # Create CSV content
         output = io.StringIO()
-        output.write(csv_data)
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow(['Order ID', 'Customer Name', 'Email', 'Phone', 'Address', 'Pincode', 
+                        'Quantity', 'Total Amount', 'Status', 'Created At', 'Payment Date', 'Payment ID'])
+        
+        # Write data
+        for order in orders:
+            writer.writerow([
+                order.order_id,
+                order.customer_name,
+                order.customer_email,
+                order.customer_phone,
+                order.shipping_address,
+                order.pincode,
+                order.quantity,
+                order.total_amount,
+                order.status,
+                order.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                order.payment_date.strftime('%Y-%m-%d %H:%M:%S') if order.payment_date else '',
+                order.razorpay_payment_id or ''
+            ])
+        
         output.seek(0)
-        return send_file(
-            io.BytesIO(output.getvalue().encode()),
-            as_attachment=True,
-            download_name=f'orders_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-            mimetype='text/csv'
-        )
+        
+        response = make_response(output.getvalue())
+        response.headers['Content-Type'] = 'text/csv'
+        response.headers['Content-Disposition'] = f'attachment; filename=orders_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        
+        return response
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Initialize database and create admin user
 def init_db():
+    """Initialize the database with tables and default admin user."""
     with app.app_context():
         db.create_all()
         
-        # Create admin user if not exists
-        admin_username = (os.getenv('ADMIN_USERNAME', 'admin') or 'admin').strip().lower()
-        admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == admin_username).first()
+        # Create default admin if it doesn't exist
+        admin = Admin.query.filter_by(username='admin').first()
         if not admin:
             admin = Admin(
-                username=admin_username,
-                password_hash=generate_password_hash(os.getenv('ADMIN_PASSWORD', 'moringa@2024'))
+                username='admin',
+                password_hash=generate_password_hash('admin123')
             )
             db.session.add(admin)
             db.session.commit()
-
-            # Ensure AdminSecurity row exists for the admin
-            sec = AdminSecurity.query.filter_by(admin_id=admin.id).first()
-            if not sec:
-                sec = AdminSecurity(admin_id=admin.id, mfa_enabled=False)
-                db.session.add(sec)
-                db.session.commit()
-        
-        # Ensure a demo customer exists for testing
-        demo_email = (os.getenv('DEMO_CUSTOMER_EMAIL', 'customer@example.com') or 'customer@example.com').strip().lower()
-        cust = Customer.query.filter_by(email=demo_email).first()
-        if not cust:
-            cust = Customer(
-                name='Demo Customer',
-                email=demo_email,
-                phone='9999999999',
-                password_hash=generate_password_hash(os.getenv('DEMO_CUSTOMER_PASSWORD', 'password123'))
-            )
-            db.session.add(cust)
-            db.session.commit()
+            print("Default admin user created: admin/admin123")
 
 @app.route('/api/payment-cancel', methods=['POST'])
 def payment_cancel():
-    """Mark order as cancelled when payment is dismissed/failed."""
     try:
-        data = request.get_json() or {}
+        if not _check_csrf_json():
+            return jsonify({'error': 'Invalid CSRF token'}), 400
+        
+        data = request.get_json()
         razorpay_order_id = data.get('razorpay_order_id')
-        order_id = data.get('order_id')
-        reason = data.get('reason', 'Payment cancelled by user')
-
-        order = None
+        
         if razorpay_order_id:
+            # Update order status to cancelled
             order = Order.query.filter_by(razorpay_order_id=razorpay_order_id).first()
-        if not order and order_id:
-            order = Order.query.filter_by(order_id=order_id).first()
-
-        if not order:
-            return jsonify({'error': 'Order not found'}), 404
-
-        # Only change pending orders to cancelled to avoid overriding successful payments
-        if order.status == 'pending':
-            order.status = 'cancelled'
-            order.updated_at = datetime.now(timezone.utc)
-            db.session.commit()
-
-        return jsonify({'status': 'ok', 'order_status': order.status, 'message': reason})
+            if order:
+                order.status = 'cancelled'
+                order.updated_at = datetime.now(timezone.utc)
+                db.session.commit()
+        
+        return jsonify({'status': 'cancelled'})
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
+@app.route('/api/send-receipt', methods=['POST'])
+def send_receipt():
+    try:
+        if not _check_csrf_json():
+            return jsonify({'error': 'Invalid CSRF token'}), 400
+        
+        data = request.get_json()
+        order_id = data.get('order_id')
+        
+        if not order_id:
+            return jsonify({'error': 'Order ID is required'}), 400
+        
+        order = Order.query.get_or_404(order_id)
+        
+        # Here you would implement email sending logic
+        # For now, we'll just return success
+        
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from email.mime.base import MIMEBase
+        from email import encoders
+        
+        # Email configuration
+        smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+        smtp_port = int(os.getenv('SMTP_PORT', '587'))
+        smtp_user = os.getenv('SMTP_USER')
+        smtp_pass = os.getenv('SMTP_PASS')
+        
+        if not all([smtp_user, smtp_pass]):
+            return jsonify({'error': 'Email configuration not found'}), 500
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = smtp_user
+        msg['To'] = order.customer_email
+        msg['Subject'] = f"Receipt for Order {order.order_id}"
+        
+        body = f"""
+        Dear {order.customer_name},
+        
+        Thank you for your order! Please find your receipt attached.
+        
+        Order Details:
+        - Order ID: {order.order_id}
+        - Total Amount: ₹{order.total_amount}
+        - Status: {order.status}
+        
+        Best regards,
+        Pure Moringa Team
+        """
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Send email
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
+        if use_tls:
+            server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+        
+        return jsonify({'status': 'sent'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def run_server():
+    """Initialize database and start the Flask development server."""
     init_db()
     port = int(os.getenv('FLASK_RUN_PORT', '5001'))
     host = os.getenv('FLASK_RUN_HOST', '0.0.0.0')
     app.run(debug=True, host=host, port=port, use_reloader=False)
+
+@app.route('/admin/mfa')
+@admin_required
+def admin_mfa():
+    sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
+    if not sec:
+        sec = AdminSecurity(admin_id=current_user.id, mfa_enabled=False)
+        db.session.add(sec)
+        db.session.commit()
+    
+    secret = None
+    otp_uri = None
+    if not sec.mfa_enabled:
+        secret = session.get('mfa_setup_secret')
+        if not secret:
+            secret = pyotp.random_base32()
+            session['mfa_setup_secret'] = secret
+        issuer = 'Pure Moringa Admin'
+        label = f"{current_user.username}"
+        otp_uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name=issuer)
+    
+    return render_template('admin_mfa.html', sec=sec, secret=secret, otp_uri=otp_uri)
+
+@app.route('/admin/mfa/enable', methods=['POST'])
+@admin_required
+def admin_mfa_enable():
+    code = request.form.get('otp', '').strip()
+    secret = session.get('mfa_setup_secret')
+    if not secret:
+        flash('MFA setup was not initiated. Please start setup again.', 'error')
+        return redirect(url_for('admin_mfa'))
+    if not code or not pyotp.TOTP(secret).verify(code):
+        flash('Invalid verification code. Please try again.', 'error')
+        return redirect(url_for('admin_mfa'))
+    sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
+    if not sec:
+        sec = AdminSecurity(admin_id=current_user.id)
+        db.session.add(sec)
+    sec.mfa_enabled = True
+    sec.totp_secret = secret
+    db.session.commit()
+    session.pop('mfa_setup_secret', None)
+    flash('Multi-Factor Authentication has been enabled successfully.', 'success')
+    return redirect(url_for('admin_mfa'))
+
+@app.route('/admin/mfa/disable', methods=['POST'])
+@admin_required
+def admin_mfa_disable():
+    code = request.form.get('otp', '').strip()
+    sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
+    if not sec or not sec.mfa_enabled:
+        flash('MFA is not currently enabled.', 'error')
+        return redirect(url_for('admin_mfa'))
+    if not sec.totp_secret or not code or not pyotp.TOTP(sec.totp_secret).verify(code):
+        flash('Invalid code. Cannot disable MFA.', 'error')
+        return redirect(url_for('admin_mfa'))
+    sec.mfa_enabled = False
+    sec.totp_secret = None
+    db.session.commit()
+    flash('Multi-Factor Authentication has been disabled.', 'success')
+    return redirect(url_for('admin_mfa'))
+
+@app.route('/api/admin/revenue-timeseries')
+@admin_required
+def api_revenue_timeseries():
+    days = request.args.get('days', 30, type=int)
+    status_arg = (request.args.get('status', '') or '').strip().lower()
+    data = get_revenue_timeseries(db, Order, days, status_arg)
+    return jsonify(data)

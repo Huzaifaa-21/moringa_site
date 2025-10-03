@@ -51,8 +51,40 @@
         {{ form.password(class_='form-control', placeholder='Your password') }}
       </div>
       <div class="form-group">
-        {{ form.submit(class_='btn') }}
+        {{ form.submit(class_='btn', id='customerLoginSubmit') }}
       </div>
+      <div id="loginLoading" class="loading-overlay" style="display:none;">
+        <div class="loading-content">
+          <div class="loading-title"><i class="fas fa-user"></i> Signing you in…</div>
+          <div class="loading-bar"><span></span></div>
+          <div class="loading-hint">Hold tight while we authenticate</div>
+        </div>
+      </div>
+      <script>
+        (function(){
+          const form = document.querySelector('form');
+          const submitBtn = document.getElementById('customerLoginSubmit');
+          const overlay = document.getElementById('loginLoading');
+          if (!form || !submitBtn || !overlay) return;
+          form.addEventListener('submit', function(){
+            overlay.style.display = 'flex';
+            submitBtn.disabled = true;
+            const bar = overlay.querySelector('.loading-bar span');
+            bar.style.width = '0%';
+            setTimeout(()=>{ bar.style.width = '70%'; }, 50);
+            overlay.classList.add('show');
+          });
+        })();
+      </script>
+      <style>
+        .loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(2px); }
+        .loading-overlay.show .loading-content { transform: translateY(0); opacity: 1; }
+        .loading-content { background:#fff; padding:24px 28px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.2); width: 92%; max-width: 420px; transform: translateY(10px); opacity: 0; transition: all .25s ease; }
+        .loading-title { font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; color:#111827; }
+        .loading-bar { height: 8px; background: #eee; border-radius: 999px; overflow: hidden; }
+        .loading-bar span { display:block; height:100%; width:0%; background: linear-gradient(90deg, #2e7d32, #43a047, #66bb6a); transition: width .6s ease; }
+        .loading-hint { margin-top:10px; color:#666; font-size: 0.95rem; }
+      </style>
     </form>
 
     <div class="links">

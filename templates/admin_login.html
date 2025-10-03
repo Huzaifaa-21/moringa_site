@@ -60,14 +60,44 @@
                 {% endif %}
             </div>
             
-            <div class="form-group">
-                <label>
-                    {{ form.remember_me() }}
-                    {{ form.remember_me.label.text }}
-                </label>
+            <div class="form-group form-check">
+                {{ form.remember_me(class="form-check-input", id="remember_me") }}
+                <label for="remember_me" class="form-check-label">{{ form.remember_me.label.text }}</label>
             </div>
             
-            {{ form.submit(class="btn", style="width: 100%; margin-top: 20px;") }}
+            {{ form.submit(class="btn", id="adminLoginSubmit", style="width: 100%; margin-top: 20px;") }}
+            <div id="loginLoading" class="loading-overlay" style="display:none;">
+              <div class="loading-content">
+                <div class="loading-title"><i class="fas fa-shield-alt"></i> Authenticating…</div>
+                <div class="loading-bar"><span></span></div>
+                <div class="loading-hint">Please wait while we verify your credentials</div>
+              </div>
+            </div>
+            <script>
+              (function(){
+                const form = document.querySelector('.login-form');
+                const submitBtn = document.getElementById('adminLoginSubmit');
+                const overlay = document.getElementById('loginLoading');
+                if (!form || !submitBtn || !overlay) return;
+                form.addEventListener('submit', function(){
+                  overlay.style.display = 'flex';
+                  submitBtn.disabled = true;
+                  const bar = overlay.querySelector('.loading-bar span');
+                  bar.style.width = '0%';
+                  setTimeout(()=>{ bar.style.width = '70%'; }, 50);
+                  overlay.classList.add('show');
+                });
+              })();
+            </script>
+            <style>
+              .loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: none; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(2px); }
+              .loading-overlay.show .loading-content { transform: translateY(0); opacity: 1; }
+              .loading-content { background:#fff; padding:24px 28px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,0.2); width: 92%; max-width: 420px; transform: translateY(10px); opacity: 0; transition: all .25s ease; }
+              .loading-title { font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; color:#111827; }
+              .loading-bar { height: 8px; background: #eee; border-radius: 999px; overflow: hidden; }
+              .loading-bar span { display:block; height:100%; width:0%; background: linear-gradient(90deg, #2e7d32, #43a047, #66bb6a); transition: width .6s ease; }
+              .loading-hint { margin-top:10px; color:#666; font-size: 0.95rem; }
+            </style>
             
             <div style="text-align: center; margin-top: 20px;">
                 <a href="/" style="color: var(--primary-color); text-decoration: none;">
@@ -104,6 +134,10 @@
             font-weight: 500;
             color: var(--text-color);
         }
+        /* Alignment for checkbox */
+        .form-check { display: flex; align-items: center; gap: 10px; }
+        .form-check-input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+        .form-check-label { margin: 0; cursor: pointer; color: var(--text-color); }
     </style>
 </body>
 </html>

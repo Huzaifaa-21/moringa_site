@@ -6,21 +6,53 @@
   <title>Your Dashboard - Moringa</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   <style>
-    .container { max-width: 980px; margin: 40px auto; padding: 0 20px; }
+    :root { --brand: #2e7d32; --brand-2: #43a047; --bg: #f6f7f9; --text: #111827; --muted: #6b7280; }
+    body { background: var(--bg); color: var(--text); }
+    .container { max-width: 1080px; margin: 40px auto; padding: 0 20px; }
     .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-    .header .brand { display: flex; align-items: center; gap: 12px; }
-    .header img { height: 44px; }
-    .header h1 { margin: 0; font-size: 22px; }
-    .card { background: #fff; border-radius: 12px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); padding: 20px; margin-bottom: 20px; }
-    .orders { width: 100%; border-collapse: collapse; }
-    .orders th, .orders td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
-    .status { padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand img { height: 44px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.12)); }
+    .brand h1 { margin: 0; font-size: 22px; }
+    .logout-btn { display: inline-flex; align-items: center; gap: 8px; background: #b00020; color: #fff; padding: 10px 14px; border-radius: 10px; text-decoration: none; font-weight: 700; transition: background .2s ease, transform .1s ease, box-shadow .2s ease; box-shadow: 0 6px 14px rgba(176,0,32,0.2); }
+    .logout-btn:hover { background: #9a001c; box-shadow: 0 8px 18px rgba(176,0,32,0.28); }
+    .logout-btn:active { transform: translateY(1px); }
+    .logout-btn:focus { outline: 3px solid rgba(176,0,32,0.35); outline-offset: 2px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    @media (min-width: 768px) { .grid { grid-template-columns: 300px 1fr; } }
+    .card { background: #fff; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.06); padding: 22px; transition: transform .2s ease, box-shadow .2s ease; }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0,0,0,0.08); }
+    .nav-card ul { list-style: none; padding: 0; margin: 0; }
+    .nav-card li + li { margin-top: 12px; }
+    .nav-link { display: flex; align-items: center; gap: 10px; color: var(--brand); text-decoration: none; font-weight: 700; }
+    .nav-link:hover { text-decoration: underline; }
+
+    .orders-table { width: 100%; border-collapse: collapse; }
+    .orders-table thead th { font-size: 12px; text-transform: uppercase; letter-spacing: .02em; color: var(--muted); }
+    .orders-table th, .orders-table td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
+    .orders-table tbody tr { transition: background .2s ease; }
+    .orders-table tbody tr:hover { background: #fafafa; }
+
+    .status { padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; display:inline-flex; align-items:center; gap:6px; }
+    .status::before { content:''; width:8px; height:8px; border-radius:50%; display:inline-block; }
     .status.pending { background: #fff8e1; color: #8a6d3b; }
+    .status.pending::before { background:#f59e0b; }
+    .status.processing { background: #e7f6e7; color: #1b5e20; }
+    .status.processing::before { background:#22c55e; }
     .status.paid { background: #e7f6e7; color: #1b5e20; }
+    .status.paid::before { background:#22c55e; }
     .status.shipped { background: #e3f2fd; color: #1565c0; }
+    .status.shipped::before { background:#3b82f6; }
     .status.cancelled { background: #ffe5e5; color: #b00020; }
-    .actions a { color: #4caf50; text-decoration: none; }
-    .flash { margin-bottom: 12px; padding: 12px; border-radius: 8px; }
+    .status.cancelled::before { background:#ef4444; }
+
+    .action-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; text-decoration: none; font-weight: 700; transition: transform .15s ease, box-shadow .2s ease; }
+    .action-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(46,125,50,0.18); }
+    .btn-primary { background: var(--brand); color: #fff; }
+    .btn-primary:hover { background: var(--brand-2); }
+    .btn-outline { border: 1.5px solid var(--brand); color: var(--brand); }
+    .btn-outline:hover { background: #eaf4ea; }
+
+    .flash { margin-bottom: 12px; padding: 12px; border-radius: 12px; }
     .flash.error { background: #ffe5e5; color: #b00020; }
     .flash.success { background: #e7f6e7; color: #1b5e20; }
   </style>
@@ -33,7 +65,9 @@
         <h1>Hello, {{ customer.name }}</h1>
       </div>
       <div>
-        <a href="{{ url_for('customer_logout') }}">Logout</a>
+        <a class="logout-btn" href="{{ url_for('customer_logout') }}" aria-label="Logout">
+          <i class="fas fa-sign-out-alt"></i> Logout
+        </a>
       </div>
     </div>
 
@@ -45,34 +79,53 @@
       {% endif %}
     {% endwith %}
 
-    <div class="card">
-      <h2>Your Orders</h2>
-      {% if orders %}
-        <table class="orders">
-          <thead>
-            <tr>
-              <th>Order ID</th>
-              <th>Quantity</th>
-              <th>Total</th>
-              <th>Status</th>
-              <th>Placed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for order in orders %}
-            <tr>
-              <td>{{ order.order_id }}</td>
-              <td>{{ order.quantity }}</td>
-              <td>₹{{ '%.2f'|format(order.total_amount) }}</td>
-              <td><span class="status {{ order.status }}">{{ order.status|capitalize }}</span></td>
-              <td>{{ order.created_at.strftime('%d %b %Y, %I:%M %p') }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p>You have no orders yet.</p>
-      {% endif %}
+    <div class="grid">
+      <div class="card nav-card">
+        <h2>Quick Navigation</h2>
+        <ul>
+          <li><a class="nav-link" href="{{ url_for('index') }}"><i class="fas fa-home"></i> Home</a></li>
+          <li><a class="nav-link" href="{{ url_for('index') }}#order"><i class="fas fa-shopping-cart"></i> Order</a></li>
+          <li><a class="nav-link" href="{{ url_for('index') }}#contact"><i class="fas fa-envelope"></i> Contact</a></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>Your Orders</h2>
+        {% if orders %}
+          <table class="orders-table">
+            <thead>
+              <tr>
+                <th>Order ID</th>
+                <th>Quantity</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Placed</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for order in orders %}
+              <tr>
+                <td>{{ order.order_id }}</td>
+                <td>{{ order.quantity }}</td>
+                <td>₹{{ '%.2f'|format(order.total_amount) }}</td>
+                <td><span class="status {{ order.status }}">{{ order.status|capitalize }}</span></td>
+                <td>{{ order.created_at.strftime('%d %b %Y, %I:%M %p') }}</td>
+                <td class="actions">
+                  {% if order.razorpay_payment_id %}
+                    <a class="action-btn btn-outline" href="/api/generate-receipt/{{ order.id }}" target="_blank"><i class="fas fa-file-pdf"></i> Receipt</a>
+                  {% else %}
+                    <span title="Receipt available after payment" style="color:#666;">N/A</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>You have no orders yet.</p>
+        {% endif %}
+      </div>
     </div>
   </div>
 </body>

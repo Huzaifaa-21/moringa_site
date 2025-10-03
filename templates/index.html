@@ -7,6 +7,9 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    {% if PLAUSIBLE_DOMAIN %}
+    <script defer data-domain="{{ PLAUSIBLE_DOMAIN }}" src="https://plausible.io/js/plausible.js"></script>
+    {% endif %}
 </head>
 <body>
     <!-- Header -->
@@ -16,21 +19,21 @@
                 <img src="{{ url_for('images', filename='logo.png') }}" alt="Pure Moringa Logo" class="logo-image">
                 <h1>Pure Moringa</h1>
             </div>
-            <div class="menu-toggle">
-                <i class="fas fa-bars"></i>
+            <div class="menu-toggle" role="button" aria-label="Toggle navigation menu" aria-controls="nav" aria-expanded="false" tabindex="0">
+                <i class="fas fa-bars" aria-hidden="true"></i>
             </div>
-            <nav id="nav">
-                <ul>
-                    <li><a href="#" class="nav-link" data-page="home">Home</a></li>
-                    <li><a href="#" class="nav-link" data-page="about">About</a></li>
-                    <li><a href="#" class="nav-link" data-page="order">Order</a></li>
-                    <li><a href="#" class="nav-link" data-page="contact">Contact</a></li>
+            <nav id="nav" aria-label="Main navigation">
+                <ul role="menubar">
+                    <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="home">Home</a></li>
+                    <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="about">About</a></li>
+                    <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="order">Order</a></li>
+                    <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="contact">Contact</a></li>
                     {% if session.get('customer_id') %}
-                    <li><a href="{{ url_for('customer_dashboard') }}">Dashboard</a></li>
-                    <li><a href="{{ url_for('customer_logout') }}">Logout</a></li>
+                    <li role="none"><a href="{{ url_for('customer_dashboard') }}">Dashboard</a></li>
+                    <li role="none"><a href="{{ url_for('customer_logout') }}">Logout</a></li>
                     {% else %}
-                    <li><a href="{{ url_for('customer_login') }}">Login</a></li>
-                    <li><a href="{{ url_for('customer_register') }}">Register</a></li>
+                    <li role="none"><a href="{{ url_for('customer_login') }}">Login</a></li>
+                    <li role="none"><a href="{{ url_for('customer_register') }}">Register</a></li>
                     {% endif %}
                 </ul>
             </nav>
@@ -242,6 +245,8 @@
                     <div class="shipping-info">
                         <p><i class="fas fa-truck"></i> Free shipping on orders of 3+ pouches</p>
                         <p><i class="fas fa-shield-alt"></i> Secure payment with Razorpay</p>
+                        <p><i class="fas fa-clock"></i> Estimated delivery: 3–5 business days</p>
+                        <p><i class="fas fa-undo"></i> Hassle-free returns within 7 days if unopened</p>
                     </div>
 
                     {% if not session.get('customer_id') %}
@@ -254,41 +259,65 @@
                     {% endif %}
 
                     <form id="order-form">
-                        <div class="form-group">
-                            <label for="quantity">Quantity:</label>
-                            <select id="quantity" name="quantity" onchange="updateTotal()">
-                                <option value="1">1 Pouch (200g) - ₹549</option>
-                                <option value="2">2 Pouches (400g) - ₹1048</option>
-                                <option value="3">3 Pouches (600g) - ₹1497 (Free Shipping)</option>
-                                <option value="5">5 Pouches (1kg) - ₹2495 (Free Shipping)</option>
-                            </select>
+                        <div class="form-section">
+                            <div class="section-heading">Order Details</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="quantity">Quantity:</label>
+                                    <select id="quantity" name="quantity" onchange="updateTotal()">
+                                        <option value="1">1 Pouch (200g) - ₹549</option>
+                                        <option value="2">2 Pouches (400g) - ₹1048</option>
+                                        <option value="3">3 Pouches (600g) - ₹1497 (Free Shipping)</option>
+                                        <option value="5">5 Pouches (1kg) - ₹2495 (Free Shipping)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Total:</label>
+                                    <div class="total-amount" aria-live="polite">
+                                        <h4><span id="total-display">₹549</span></h4>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="total-amount">
-                            <h4>Total: <span id="total-display">₹549</span></h4>
+                        
+                        <div class="form-section">
+                            <div class="section-heading">Customer Information</div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="name">Full Name:</label>
+                                    <input type="text" id="name" name="name" required autocomplete="name">
+                                </div>
+                                <div class="form-group">
+                                    <label for="email">Email:</label>
+                                    <input type="email" id="email" name="email" required autocomplete="email">
+                                </div>
+                                <div class="form-group">
+                                    <label for="phone">Phone:</label>
+                                    <input type="tel" id="phone" name="phone" required autocomplete="tel" inputmode="numeric" pattern="\d{10}" maxlength="10">
+                                </div>
+                                <div class="form-group">
+                                    <label for="pincode">Pincode:</label>
+                                    <input type="text" id="pincode" name="pincode" required inputmode="numeric" pattern="\d{6}" maxlength="6">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="address">Shipping Address:</label>
+                                <textarea id="address" name="address" required autocomplete="shipping address-line1"></textarea>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="name">Full Name:</label>
-                            <input type="text" id="name" name="name" required>
+                        
+                        <div class="form-section" aria-describedby="checkout-info">
+                            <div id="checkout-info" class="section-heading" style="display:flex; align-items:center; gap:12px;">
+                                <span>Checkout</span>
+                            </div>
+                            <p style="margin:10px 0; color:#444;">
+                                <i class="fas fa-clock"></i> Estimated delivery: 3–5 business days. 
+                                <i class="fas fa-undo" style="margin-left:10px;"></i> Hassle-free returns within 7 days if unopened.
+                            </p>
+                            <button type="submit" class="btn">
+                                <i class="fas fa-credit-card"></i> Pay with Razorpay
+                            </button>
                         </div>
-                        <div class="form-group">
-                            <label for="email">Email:</label>
-                            <input type="email" id="email" name="email" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="phone">Phone:</label>
-                            <input type="tel" id="phone" name="phone" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="address">Shipping Address:</label>
-                            <textarea id="address" name="address" required></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="pincode">Pincode:</label>
-                            <input type="text" id="pincode" name="pincode" required>
-                        </div>
-                        <button type="submit" class="btn">
-                            <i class="fas fa-credit-card"></i> Pay with Razorpay
-                        </button>
                     </form>
                 </div>
             </div>
@@ -387,6 +416,7 @@
             const pages = document.querySelectorAll('.page');
             const menuToggle = document.querySelector('.menu-toggle');
             const nav = document.getElementById('nav');
+            const csrfToken = document.cookie.split('; ').find(row => row.startsWith('csrf_token='))?.split('=')[1];
             
             // Notification helper
             function showNotification(message, type = 'info') {
@@ -410,8 +440,17 @@
             }
             
             // Toggle mobile menu
-            menuToggle.addEventListener('click', function() {
+            function toggleMenu(){
+                const expanded = menuToggle.getAttribute('aria-expanded') === 'true';
+                menuToggle.setAttribute('aria-expanded', (!expanded).toString());
                 nav.classList.toggle('active');
+            }
+            menuToggle.addEventListener('click', toggleMenu);
+            menuToggle.addEventListener('keydown', function(e){
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleMenu();
+                }
             });
             
             // Handle navigation
@@ -431,6 +470,7 @@
                         
                         // Close mobile menu if open
                         nav.classList.remove('active');
+                        menuToggle.setAttribute('aria-expanded', 'false');
                         
                         // Scroll to top
                         window.scrollTo(0, 0);
@@ -449,6 +489,10 @@
             
             // Initialize total
             updateTotal();
+            
+            function track(eventName, props = {}){
+                try { window.plausible && window.plausible(eventName, { props }); } catch(e) {}
+            }
             
             // Payment processing
             document.getElementById('order-form').addEventListener('submit', function(e) {
@@ -480,6 +524,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {})
                     },
                     body: JSON.stringify(formData)
                 })
@@ -488,6 +533,7 @@
                     if (data.error) {
                         throw new Error(data.error);
                     }
+                    track('order-create', { order_id: data.order_id, amount: data.amount });
                     
                     // Initialize Razorpay
                     const options = {
@@ -505,7 +551,7 @@
                             // Inline payment verification to avoid undefined function
                             fetch('/api/verify-payment', {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}) },
                                 body: JSON.stringify({
                                     razorpay_order_id: options.order_id,
                                     razorpay_payment_id: response.razorpay_payment_id,
@@ -515,12 +561,22 @@
                             .then(res => res.json())
                             .then(result => {
                                 if (result.status === 'success') {
+                                    track('payment-success', { order_id: result.order_id });
                                     showNotification('Payment successful! Generating receipt...', 'success');
                                     // Re-enable submit button
                                     submitBtn.innerHTML = originalText;
                                     submitBtn.disabled = false;
                                     // Open receipt in new tab
-                                    window.open(`/api/generate-receipt/${result.order_id}`, '_blank');
+                                    const url = `/api/generate-receipt/${result.order_id}`;
+                                    window.open(url, '_blank');
+                                    track('receipt-opened', { order_id: result.order_id });
+                                    
+                                    // Email receipt
+                                    fetch('/api/send-receipt', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}) },
+                                        body: JSON.stringify({ order_id: result.order_id, email: formData.email })
+                                    }).catch(() => {});
                                 } else {
                                     showNotification(result.error || 'Payment verification failed', 'error');
                                     submitBtn.innerHTML = originalText;
@@ -531,6 +587,7 @@
                                 showNotification('Payment verification failed: ' + err.message, 'error');
                                 submitBtn.innerHTML = originalText;
                                 submitBtn.disabled = false;
+                                track('payment-failed', { reason: err.message });
                             });
                         },
                         modal: {
@@ -538,10 +595,11 @@
                                 submitBtn.innerHTML = originalText;
                                 submitBtn.disabled = false;
                                 showNotification('Payment cancelled', 'error');
+                                track('payment-failed', { reason: 'modal-dismiss' });
                                 try {
                                     fetch('/api/payment-cancel', {
                                         method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
+                                        headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}) },
                                         body: JSON.stringify({
                                             razorpay_order_id: options.order_id,
                                             reason: 'Razorpay modal dismissed'
@@ -552,25 +610,49 @@
                         }
                     };
 
-                    // Launch Razorpay Checkout and capture failure events
-                    const rzp = new Razorpay(options);
-                    rzp.on('payment.failed', function (response) {
-                        showNotification('Payment failed: ' + (response.error && response.error.description || 'Unknown error'), 'error');
-                        try {
-                            fetch('/api/payment-cancel', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    razorpay_order_id: options.order_id,
-                                    reason: 'Payment failed: ' + (response.error && response.error.description || 'Unknown error')
-                                })
-                            }).catch(() => {});
-                        } catch (e) {}
+                    // Launch Razorpay Checkout and capture failure events (with guards)
+                    if (!window.Razorpay) {
+                        showNotification('Payment library failed to load. Please check your connection and try again.', 'error');
                         submitBtn.innerHTML = originalText;
                         submitBtn.disabled = false;
-                    });
-                    rzp.open();
-                }); // end fetch .then(data => { ... })
+                        return;
+                    }
+                    if (!options.key || !options.order_id) {
+                        showNotification('Payment initialization failed. Missing configuration.', 'error');
+                        submitBtn.innerHTML = originalText;
+                        submitBtn.disabled = false;
+                        return;
+                    }
+                    try {
+                        const rzp = new Razorpay(options);
+                        rzp.on('payment.failed', function (response) {
+                            showNotification('Payment failed: ' + (response.error && response.error.description || 'Unknown error'), 'error');
+                            track('payment-failed', { reason: response.error && response.error.description || 'Unknown error' });
+                            try {
+                                fetch('/api/payment-cancel', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}) },
+                                    body: JSON.stringify({
+                                        razorpay_order_id: options.order_id,
+                                        reason: 'Payment failed: ' + (response.error && response.error.description || 'Unknown error')
+                                    })
+                                }).catch(() => {});
+                            } catch (e) {}
+                            submitBtn.innerHTML = originalText;
+                            submitBtn.disabled = false;
+                        });
+                        rzp.open();
+                    } catch (e) {
+                        showNotification('Unable to open payment: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+                        submitBtn.innerHTML = originalText;
+                        submitBtn.disabled = false;
+                    }
+                }) // end fetch .then(data => { ... })
+                .catch(err => {
+                    showNotification('Unable to initiate payment: ' + (err && err.message ? err.message : 'Unknown error'), 'error');
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                });
             }); // end submit handler
         }); // end DOMContentLoaded
     </script>
