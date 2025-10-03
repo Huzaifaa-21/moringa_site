@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Factor Authentication Setup - Pure Moringa Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .mfa-container {
+            max-width: 600px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .mfa-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .mfa-header h1 {
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+        .security-badge {
+            display: inline-block;
+            background: #e74c3c;
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        .mfa-steps {
+            margin: 2rem 0;
+        }
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+        }
+        .step-number {
+            background: #3498db;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 1rem;
+            flex-shrink: 0;
+        }
+        .step-content h3 {
+            margin: 0 0 0.5rem 0;
+            color: #2c3e50;
+        }
+        .qr-container {
+            text-align: center;
+            margin: 2rem 0;
+            padding: 2rem;
+            background: white;
+            border: 2px dashed #bdc3c7;
+            border-radius: 8px;
+        }
+        .qr-code {
+            margin: 1rem 0;
+        }
+        .secret-key {
+            background: #ecf0f1;
+            padding: 1rem;
+            border-radius: 5px;
+            font-family: monospace;
+            word-break: break-all;
+            margin: 1rem 0;
+            border: 1px solid #bdc3c7;
+        }
+        .verification-form {
+            background: #f8f9fa;
+            padding: 2rem;
+            border-radius: 8px;
+            margin-top: 2rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #bdc3c7;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        .btn {
+            background: #27ae60;
+            color: white;
+            padding: 0.75rem 2rem;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn:hover {
+            background: #219a52;
+        }
+        .btn:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .btn-danger {
+            background: #e74c3c;
+        }
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        .alert {
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 1rem;
+        }
+        .alert-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .alert-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .alert-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .mfa-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+        .status-enabled {
+            background: #d4edda;
+            border-color: #c3e6cb;
+        }
+        .status-disabled {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        .recommended-apps {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #e8f4f8;
+            border-radius: 5px;
+        }
+        .app-list {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+        .app-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: white;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        @media (max-width: 768px) {
+            .mfa-container {
+                margin: 1rem;
+                padding: 1rem;
+            }
+            .step {
+                flex-direction: column;
+                text-align: center;
+            }
+            .step-number {
+                margin: 0 auto 1rem auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="mfa-container">
+        <div class="mfa-header">
+            <div class="security-badge">
+                <i class="fas fa-shield-alt"></i> SECURITY REQUIRED
+            </div>
+            <h1><i class="fas fa-mobile-alt"></i> Multi-Factor Authentication</h1>
+            <p>Secure your admin account with an additional layer of protection</p>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'error' if category == 'error' else category }}" role="alert">
+                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'warning' else 'info-circle' if category == 'info' else 'check-circle' if category == 'success' else 'times-circle' }}"></i>
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% if sec and sec.mfa_enabled %}
+            <!-- MFA Already Enabled -->
+            <div class="mfa-status status-enabled">
+                <div>
+                    <h3><i class="fas fa-check-circle text-success"></i> MFA is Enabled</h3>
+                    <p>Your account is protected with Multi-Factor Authentication</p>
+                </div>
+                <div>
+                    <form method="POST" action="{{ url_for('admin_mfa_disable') }}" style="display: inline;">
+                        {{ csrf_token() }}
+                        <div class="form-group">
+                            <label for="disable_otp">Enter current authenticator code to disable MFA:</label>
+                            <input type="text" id="disable_otp" name="otp" class="form-control" 
+                                   placeholder="000000" maxlength="6" pattern="[0-9]{6}" 
+                                   required aria-describedby="disable-help">
+                            <small id="disable-help" class="form-text">Enter the 6-digit code from your authenticator app</small>
+                        </div>
+                        <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to disable MFA? This will reduce your account security.')">
+                            <i class="fas fa-times"></i> Disable MFA
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 2rem;">
+                <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+            </div>
+        {% else %}
+            <!-- MFA Setup Required -->
+            <div class="alert alert-warning" role="alert">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>MFA Setup Required:</strong> For security reasons, all admin accounts must have Multi-Factor Authentication enabled. Please complete the setup below to access admin features.
+            </div>
+
+            <div class="mfa-steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Install an Authenticator App</h3>
+                        <p>Download and install one of these recommended authenticator apps on your mobile device:</p>
+                        <div class="recommended-apps">
+                            <div class="app-list">
+                                <div class="app-item">
+                                    <i class="fab fa-google"></i> Google Authenticator
+                                </div>
+                                <div class="app-item">
+                                    <i class="fas fa-mobile-alt"></i> Authy
+                                </div>
+                                <div class="app-item">
+                                    <i class="fas fa-key"></i> Microsoft Authenticator
+                                </div>
+                                <div class="app-item">
+                                    <i class="fas fa-shield-alt"></i> 1Password
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Scan the QR Code</h3>
+                        <p>Open your authenticator app and scan this QR code:</p>
+                        <div class="qr-container">
+                            {% if otp_uri %}
+                                <div class="qr-code">
+                                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={{ otp_uri | urlencode }}" 
+                                         alt="QR Code for MFA Setup" 
+                                         style="max-width: 200px; height: auto;">
+                                </div>
+                                <p><strong>Can't scan?</strong> Manually enter this secret key:</p>
+                                <div class="secret-key" role="region" aria-label="Secret key for manual entry">
+                                    {{ secret }}
+                                </div>
+                                <small>Account: {{ current_user.username }} | Issuer: Pure Moringa Admin</small>
+                            {% else %}
+                                <p><em>QR code will appear here after you refresh the page</em></p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Verify Setup</h3>
+                        <p>Enter the 6-digit code from your authenticator app to complete setup:</p>
+                        
+                        <form method="POST" action="{{ url_for('admin_mfa_enable') }}" class="verification-form">
+                            {{ csrf_token() }}
+                            <div class="form-group">
+                                <label for="verification_code">Verification Code:</label>
+                                <input type="text" id="verification_code" name="otp" class="form-control" 
+                                       placeholder="000000" maxlength="6" pattern="[0-9]{6}" 
+                                       required aria-describedby="verification-help" autocomplete="one-time-code">
+                                <small id="verification-help" class="form-text">
+                                    Enter the 6-digit code displayed in your authenticator app
+                                </small>
+                            </div>
+                            <button type="submit" class="btn" id="enable-mfa-btn">
+                                <i class="fas fa-shield-alt"></i> Enable MFA & Continue
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-info" role="alert">
+                <i class="fas fa-info-circle"></i>
+                <strong>Security Note:</strong> Once MFA is enabled, you'll need your authenticator app to log in. Make sure to save your backup codes in a secure location.
+            </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // Auto-focus on verification code input
+        document.addEventListener('DOMContentLoaded', function() {
+            const verificationInput = document.getElementById('verification_code');
+            if (verificationInput) {
+                verificationInput.focus();
+                
+                // Auto-format input (numbers only)
+                verificationInput.addEventListener('input', function(e) {
+                    e.target.value = e.target.value.replace(/[^0-9]/g, '');
+                });
+                
+                // Auto-submit when 6 digits are entered
+                verificationInput.addEventListener('input', function(e) {
+                    if (e.target.value.length === 6) {
+                        const btn = document.getElementById('enable-mfa-btn');
+                        btn.textContent = 'Verifying...';
+                        btn.disabled = true;
+                        setTimeout(() => {
+                            e.target.form.submit();
+                        }, 500);
+                    }
+                });
+            }
+            
+            // Auto-focus on disable MFA input
+            const disableInput = document.getElementById('disable_otp');
+            if (disableInput) {
+                disableInput.addEventListener('input', function(e) {
+                    e.target.value = e.target.value.replace(/[^0-9]/g, '');
+                });
+            }
+        });
+        
+        // Refresh QR code if needed
+        function refreshQR() {
+            window.location.reload();
+        }
+        
+        // Copy secret key to clipboard
+        function copySecret() {
+            const secretElement = document.querySelector('.secret-key');
+            if (secretElement) {
+                navigator.clipboard.writeText(secretElement.textContent.trim()).then(() => {
+                    alert('Secret key copied to clipboard!');
+                });
+            }
+        }
+    </script>
+</body>
+</html>

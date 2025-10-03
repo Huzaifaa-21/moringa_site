@@ -35,7 +35,7 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
-          <div class="flash {{ category }}">{{ message }}</div>
+          <div class="flash {{ category }}">{{ message|safe }}</div>
         {% endfor %}
       {% endif %}
     {% endwith %}
@@ -90,6 +90,10 @@
     <div class="links">
       <a href="{{ url_for('customer_register') }}">Create an account</a> ·
       <a href="{{ url_for('index') }}">Back to home</a>
+    </div>
+
+    <div class="links" style="margin-top: 14px;">
+      <a href="{{ url_for('customer_verify') }}">Having trouble logging in? Verify your account</a>
     </div>
   </div>
 </body>

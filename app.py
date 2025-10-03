@@ -23,6 +23,8 @@ from functools import wraps
 import secrets
 import pyotp
 from services.analytics import get_revenue_timeseries
+from services.customer_auth import CustomerAuthService
+from api.customer_orders import create_customer_orders_api
 
 # Load environment variables
 load_dotenv()
@@ -46,6 +48,25 @@ def admin_required(f):
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('admin_login'))
+        
+        # Check if MFA is configured for this admin
+        sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
+        
+        # Always require MFA setup - no exceptions for new users
+        if not sec or not sec.mfa_enabled:
+            # Create AdminSecurity record if it doesn't exist (but don't commit yet)
+            if not sec:
+                sec = AdminSecurity(admin_id=current_user.id, mfa_enabled=False)
+                db.session.add(sec)
+                db.session.commit()
+            
+            # Redirect to mandatory MFA setup (except for MFA routes and logout)
+            if not request.path.startswith('/admin/mfa') and request.path != '/admin/logout':
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'MFA setup required', 'redirect': '/admin/mfa'}), 403
+                flash('Multi-Factor Authentication setup is required for security. Please configure MFA to continue.', 'warning')
+                return redirect(url_for('admin_mfa'))
+        
         return f(*args, **kwargs)
     return wrapper
 
@@ -81,7 +102,19 @@ class Customer(db.Model):
     email = db.Column(db.String(100), unique=True, nullable=False)
     phone = db.Column(db.String(20), nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
+    email_verified = db.Column(db.Boolean, default=False)
+    email_verification_token = db.Column(db.String(100), nullable=True)
+    email_verification_sent_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+class CustomerSecurity(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False, unique=True)
+    mfa_enabled = db.Column(db.Boolean, default=False)
+    totp_secret = db.Column(db.String(32), nullable=True)
+    backup_codes = db.Column(db.Text, nullable=True)  # JSON string of backup codes
+    mfa_setup_at = db.Column(db.DateTime, nullable=True)
+    last_mfa_used = db.Column(db.DateTime, nullable=True)
 
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -107,6 +140,47 @@ class Order(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     payment_date = db.Column(db.DateTime, nullable=True)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+# Initialize services after models are defined
+customer_auth_service = CustomerAuthService(db, Customer, Order, CustomerSecurity)
+
+# Initialize secure customer API
+create_customer_orders_api(app, db, Customer, Order, customer_auth_service)
+
+def customer_owns_resource(resource_check_func):
+    """
+    Decorator to ensure customer can only access their own resources.
+    resource_check_func should return True if customer owns the resource.
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            customer_id = session.get('customer_id')
+            if not customer_id:
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Authentication required'}), 401
+                return redirect(url_for('customer_login'))
+            
+            customer = Customer.query.get(customer_id)
+            if not customer:
+                session.pop('customer_id', None)
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Invalid session'}), 401
+                return redirect(url_for('customer_login'))
+            
+            # Check if customer owns the resource
+            if not resource_check_func(customer, *args, **kwargs):
+                client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+                app.logger.warning(f"Customer '{customer.email}' attempted unauthorized access to {request.path} from IP {client_ip}")
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Access denied'}), 403
+                flash('You do not have permission to access this resource.', 'error')
+                return redirect(url_for('customer_dashboard'))
+            
+            request.current_customer = customer
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -275,10 +349,26 @@ def verify_payment():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Helper function to check if customer owns an order
+def customer_owns_order(customer, order_id):
+    """Check if the customer owns the specified order."""
+    order = Order.query.get(order_id)
+    if not order:
+        return False
+    return order.customer_email == customer.email
+
 @app.route('/api/generate-receipt/<int:order_id>')
+@customer_owns_resource(customer_owns_order)
 def generate_receipt(order_id):
     try:
+        # Customer ownership already verified by decorator
         order = Order.query.get_or_404(order_id)
+        customer = request.current_customer
+        
+        # Double-check ownership for extra security
+        if order.customer_email != customer.email:
+            app.logger.warning(f"Customer '{customer.email}' attempted to access order {order_id} belonging to '{order.customer_email}'")
+            return jsonify({'error': 'Access denied'}), 403
         
         # Create PDF
         buffer = io.BytesIO()
@@ -366,57 +456,160 @@ class AdminLoginForm(FlaskForm):
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     form = AdminLoginForm()
+    
+    # Rate limiting check
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    login_attempts_key = f"login_attempts_{client_ip}"
+    lockout_key = f"login_lockout_{client_ip}"
+    
+    # Check if IP is locked out
+    if session.get(lockout_key):
+        lockout_time = session.get(f"{lockout_key}_time", 0)
+        if datetime.now().timestamp() - lockout_time < 900:  # 15 minutes lockout
+            app.logger.warning(f"Login attempt from locked out IP: {client_ip}")
+            flash('Too many failed login attempts. Please try again in 15 minutes.', 'error')
+            return render_template('admin_login.html', form=form)
+        else:
+            # Clear lockout after timeout
+            session.pop(lockout_key, None)
+            session.pop(f"{lockout_key}_time", None)
+            session.pop(login_attempts_key, None)
+    
     if request.method == 'POST' and request.is_json:
         data = request.get_json()
         username = (data.get('username') or '').strip().lower()
         password = data.get('password')
         otp_val = data.get('otp')
+        
+        # Check rate limiting
+        attempts = session.get(login_attempts_key, 0)
+        if attempts >= 5:
+            session[lockout_key] = True
+            session[f"{lockout_key}_time"] = datetime.now().timestamp()
+            app.logger.warning(f"IP {client_ip} locked out after 5 failed attempts")
+            return jsonify({'error': 'Too many failed attempts. Account locked for 15 minutes.'}), 429
+        
         admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == username).first()
         if admin and check_password_hash(admin.password_hash, password):
             sec = AdminSecurity.query.filter_by(admin_id=admin.id).first()
-            if sec and sec.mfa_enabled:
+            
+            # Always check for MFA - create record if it doesn't exist
+            if not sec:
+                sec = AdminSecurity(admin_id=admin.id, mfa_enabled=False)
+                db.session.add(sec)
+                db.session.commit()
+            
+            # If MFA is enabled, require OTP code
+            if sec.mfa_enabled:
                 if not otp_val or not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(otp_val):
+                    session[login_attempts_key] = attempts + 1
+                    app.logger.warning(f"Invalid MFA code for admin '{username}' from IP {client_ip}")
                     return jsonify({'error': 'Invalid MFA code'}), 401
+            
+            # Successful login - clear rate limiting
+            session.pop(login_attempts_key, None)
+            session.pop(lockout_key, None)
+            session.pop(f"{lockout_key}_time", None)
+            
             login_user(admin)
-            app.logger.info(f"Admin '{username}' logged in via JSON")
+            app.logger.info(f"Admin '{username}' logged in successfully via JSON from IP {client_ip}")
             return jsonify({'status': 'success', 'redirect': '/admin/dashboard'})
-        app.logger.warning(f"Admin login failed for '{username}' via JSON")
+        
+        # Failed login
+        session[login_attempts_key] = attempts + 1
+        app.logger.warning(f"Failed login attempt for '{username}' from IP {client_ip} (attempt {attempts + 1})")
         return jsonify({'error': 'Invalid credentials'}), 401
 
     if request.method == 'POST':
         if form.validate_on_submit():
             username_input = (form.username.data or '').strip().lower()
+            
+            # Check rate limiting
+            attempts = session.get(login_attempts_key, 0)
+            if attempts >= 5:
+                session[lockout_key] = True
+                session[f"{lockout_key}_time"] = datetime.now().timestamp()
+                app.logger.warning(f"IP {client_ip} locked out after 5 failed attempts")
+                flash('Too many failed login attempts. Please try again in 15 minutes.', 'error')
+                return render_template('admin_login.html', form=form)
+            
             admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == username_input).first()
             if admin and check_password_hash(admin.password_hash, form.password.data):
                 sec = AdminSecurity.query.filter_by(admin_id=admin.id).first()
-                if sec and sec.mfa_enabled:
+                
+                # Always check for MFA - create record if it doesn't exist
+                if not sec:
+                    sec = AdminSecurity(admin_id=admin.id, mfa_enabled=False)
+                    db.session.add(sec)
+                    db.session.commit()
+                
+                # If MFA is enabled, require OTP code
+                if sec.mfa_enabled:
                     otp_val = form.otp.data
                     if not otp_val or not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(otp_val):
-                        flash('Invalid MFA code', 'error')
-                        app.logger.warning(f"Admin '{username_input}' provided invalid MFA code")
+                        session[login_attempts_key] = attempts + 1
+                        flash('Invalid MFA code. Please check your authenticator app and try again.', 'error')
+                        app.logger.warning(f"Invalid MFA code for admin '{username_input}' from IP {client_ip}")
                         return render_template('admin_login.html', form=form)
+                
+                # Successful login - clear rate limiting
+                session.pop(login_attempts_key, None)
+                session.pop(lockout_key, None)
+                session.pop(f"{lockout_key}_time", None)
+                
                 login_user(admin, remember=form.remember_me.data)
-                app.logger.info(f"Admin '{username_input}' logged in successfully")
+                app.logger.info(f"Admin '{username_input}' logged in successfully from IP {client_ip}")
                 return redirect(url_for('admin_dashboard'))
-            flash('Invalid credentials', 'error')
-            app.logger.warning(f"Admin login failed for '{username_input}' via form")
+            
+            # Failed login
+            session[login_attempts_key] = attempts + 1
+            remaining_attempts = 5 - (attempts + 1)
+            if remaining_attempts > 0:
+                flash(f'Invalid credentials. {remaining_attempts} attempts remaining before lockout.', 'error')
+            else:
+                flash('Invalid credentials. Account will be locked after next failed attempt.', 'error')
+            app.logger.warning(f"Failed login attempt for '{username_input}' from IP {client_ip} (attempt {attempts + 1})")
         else:
-            # Form submission failed (e.g., CSRF or validation errors)
+            # Form validation failed
             if hasattr(form, 'csrf_token') and form.csrf_token.errors:
                 flash('Session expired or invalid CSRF token. Please refresh and try again.', 'error')
-                app.logger.warning('Admin login CSRF validation failed')
+                app.logger.warning(f'Admin login CSRF validation failed from IP {client_ip}')
             else:
                 flash('Please correct the highlighted errors and try again.', 'error')
-                app.logger.warning('Admin login form validation failed')
+                app.logger.warning(f'Admin login form validation failed from IP {client_ip}')
             return render_template('admin_login.html', form=form)
+    
     return render_template('admin_login.html', form=form)
 
 
 def customer_login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not session.get('customer_id'):
+        client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+        
+        # Check if customer is authenticated
+        customer_id = session.get('customer_id')
+        if not customer_id:
+            app.logger.warning(f"Unauthorized access attempt to {request.path} from IP {client_ip}")
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Authentication required'}), 401
+            flash('Please log in to access this page.', 'error')
             return redirect(url_for('customer_login'))
+        
+        # Verify customer exists and session is valid
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            app.logger.warning(f"Invalid customer session {customer_id} from IP {client_ip}")
+            session.pop('customer_id', None)
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Invalid session'}), 401
+            flash('Your session has expired. Please log in again.', 'error')
+            return redirect(url_for('customer_login'))
+        
+        # Add customer object to request context for easy access
+        request.current_customer = customer
+        app.logger.info(f"Customer '{customer.email}' accessing {request.path} from IP {client_ip}")
+        
         return f(*args, **kwargs)
     return wrapper
 
@@ -431,7 +624,12 @@ class CustomerRegisterForm(FlaskForm):
 class CustomerLoginForm(FlaskForm):
     email = StringField('Email', validators=[DataRequired(), Email()])
     password = PasswordField('Password', validators=[DataRequired()])
+    otp = StringField('Authenticator Code (if MFA enabled)', render_kw={'placeholder': '000000'})
     submit = SubmitField('Login')
+
+class CustomerVerificationForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    submit = SubmitField('Resend Verification Email')
 
 # Customer authentication routes
 @app.route('/customer/register', methods=['GET', 'POST'])
@@ -442,60 +640,264 @@ def customer_register():
         if existing:
             flash('An account with this email already exists. Please log in.', 'error')
             return redirect(url_for('customer_login'))
+        
+        # Generate email verification token
+        verification_token = customer_auth_service.generate_verification_token()
+        
         customer = Customer(
             name=form.name.data.strip(),
             email=form.email.data.lower().strip(),
             phone=form.phone.data.strip(),
-            password_hash=generate_password_hash(form.password.data)
+            password_hash=generate_password_hash(form.password.data),
+            email_verification_token=verification_token,
+            email_verification_sent_at=datetime.now(timezone.utc)
         )
         db.session.add(customer)
         db.session.commit()
-        session['customer_id'] = customer.id
-        flash('Registration successful. Welcome!', 'success')
-        return redirect(url_for('customer_dashboard'))
+        
+        # Send verification email
+        verification_url = url_for('verify_customer_email', token=verification_token, _external=True)
+        sent = customer_auth_service.send_verification_email(customer, verification_url)
+        
+        if sent:
+            flash('Registration successful! Please check your email to verify your account before logging in.', 'success')
+        else:
+            flash(f'Registration successful! However, we could not send the verification email automatically. Please use this link to verify: <a href="{verification_url}" target="_blank">Verify Email</a><br><br><strong>Note:</strong> To receive emails automatically, please configure SMTP settings in your .env file.', 'warning')
+        
+        return redirect(url_for('customer_login'))
     return render_template('customer_register.html', form=form)
 
 @app.route('/customer/login', methods=['GET', 'POST'])
 def customer_login():
     form = CustomerLoginForm()
+    
+    # Rate limiting for customer login
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    login_attempts_key = f"customer_login_attempts_{client_ip}"
+    lockout_key = f"customer_login_lockout_{client_ip}"
+    
+    # Check if IP is locked out
+    if session.get(lockout_key):
+        lockout_time = session.get(f"{lockout_key}_time", 0)
+        if datetime.now().timestamp() - lockout_time < 600:  # 10 minutes lockout for customers
+            app.logger.warning(f"Customer login attempt from locked out IP: {client_ip}")
+            flash('Too many failed login attempts. Please try again in 10 minutes.', 'error')
+            return render_template('customer_login.html', form=form)
+        else:
+            # Clear lockout after timeout
+            session.pop(lockout_key, None)
+            session.pop(f"{lockout_key}_time", None)
+            session.pop(login_attempts_key, None)
+    
     if request.method == 'POST':
         if form.validate_on_submit():
-            email_input = ((form.email.data or '').strip().lower())
-            customer = Customer.query.filter_by(email=email_input).first()
-            if customer and check_password_hash(customer.password_hash, form.password.data):
-                session['customer_id'] = customer.id
-                flash('Logged in successfully.', 'success')
-                app.logger.info(f"Customer '{email_input}' logged in successfully")
+            email_input = form.email.data.strip().lower()
+            
+            # Check rate limiting
+            attempts = session.get(login_attempts_key, 0)
+            if attempts >= 5:
+                session[lockout_key] = True
+                session[f"{lockout_key}_time"] = datetime.now().timestamp()
+                app.logger.warning(f"Customer IP {client_ip} locked out after 5 failed attempts")
+                flash('Too many failed login attempts. Please try again in 10 minutes.', 'error')
+                return render_template('customer_login.html', form=form)
+            
+            # Use authentication service with MFA support
+            success, customer, error_msg, needs_mfa = customer_auth_service.authenticate_customer(
+                email_input, form.password.data, form.otp.data if form.otp.data else None
+            )
+            
+            if success and customer:
+                # Successful login - clear rate limiting
+                session.pop(login_attempts_key, None)
+                session.pop(lockout_key, None)
+                session.pop(f"{lockout_key}_time", None)
+                
+                # Create secure session
+                customer_auth_service.create_customer_session(customer)
+                flash('Logged in successfully. Welcome back!', 'success')
                 return redirect(url_for('index'))
-            # Keep generic error for security, but log specifics
-            if not customer:
-                app.logger.warning(f"Customer login failed: account not found for '{email_input}'")
+            elif needs_mfa:
+                # Customer needs to provide MFA code
+                flash('Please enter your authenticator code to complete login.', 'info')
+                return render_template('customer_login.html', form=form, needs_mfa=True)
             else:
-                app.logger.warning(f"Customer login failed: incorrect password for '{email_input}'")
-            flash('Invalid credentials', 'error')
+                # Failed login
+                session[login_attempts_key] = attempts + 1
+                remaining_attempts = 5 - (attempts + 1)
+
+                # If account is unverified, redirect to dedicated verification page
+                if error_msg and 'verify your email' in error_msg.lower():
+                    session['pending_verification_email'] = email_input
+                    flash('Your account is not verified. Please verify to continue.', 'error')
+                    app.logger.info(f"Redirecting unverified customer '{email_input}' to verification page from IP {client_ip}")
+                    return redirect(url_for('customer_verify', email=email_input))
+
+                if remaining_attempts > 0:
+                    flash(f'{error_msg}. {remaining_attempts} attempts remaining before temporary lockout.', 'error')
+                else:
+                    flash(f'{error_msg}. Account will be temporarily locked after next failed attempt.', 'error')
+                
+                app.logger.warning(f"Failed customer login attempt for '{email_input}' from IP {client_ip} (attempt {attempts + 1}): {error_msg}")
         else:
             if hasattr(form, 'csrf_token') and form.csrf_token.errors:
                 flash('Session expired or invalid CSRF token. Please refresh and try again.', 'error')
-                app.logger.warning('Customer login CSRF validation failed')
+                app.logger.warning(f'Customer login CSRF validation failed from IP {client_ip}')
             else:
                 flash('Please correct the highlighted errors and try again.', 'error')
-                app.logger.warning('Customer login form validation failed')
+                app.logger.warning(f'Customer login form validation failed from IP {client_ip}')
             return render_template('customer_login.html', form=form)
+    
     return render_template('customer_login.html', form=form)
+
+@app.route('/customer/verify', methods=['GET'])
+def customer_verify():
+    """Dedicated page to handle customer email verification."""
+    form = CustomerVerificationForm()
+    # Pre-fill email from query or session
+    email = request.args.get('email') or session.get('pending_verification_email')
+    if email:
+        form.email.data = email
+    return render_template('customer_verify.html', form=form)
+
+@app.route('/customer/verify-email/<token>')
+def verify_customer_email(token):
+    """Verify customer email address."""
+    success, customer, message = customer_auth_service.verify_email_token(token)
+    
+    if success:
+        flash(f'Email verified successfully! You can now log in to your account.', 'success')
+        return redirect(url_for('customer_login'))
+    else:
+        flash(f'Email verification failed: {message}', 'error')
+        return redirect(url_for('customer_login'))
+
+@app.route('/customer/resend-verification', methods=['POST'])
+def resend_customer_verification():
+    """Resend email verification with CSRF validation and detailed logging."""
+    try:
+        form = CustomerVerificationForm()
+        if not form.validate_on_submit():
+            # CSRF or validation errors
+            if hasattr(form, 'csrf_token') and form.csrf_token.errors:
+                flash('Session expired or invalid request. Please refresh and try again.', 'error')
+                app.logger.warning('Resend verification CSRF validation failed')
+            else:
+                flash('Please provide a valid email address.', 'error')
+                app.logger.warning('Resend verification form validation failed')
+            return redirect(url_for('customer_verify'))
+
+        email = form.email.data.strip().lower()
+        success, message = customer_auth_service.resend_verification_email(email)
+
+        # Persist email on session to prefill the verify page
+        session['pending_verification_email'] = email
+
+        if success:
+            flash(message, 'success')
+        else:
+            # Check if it's a configuration issue
+            if 'SMTP configuration missing' in str(message) or not os.getenv('SMTP_USER') or not os.getenv('SMTP_PASS'):
+                verification_url = url_for('verify_customer_email', 
+                                         token=customer_auth_service.generate_verification_token(), 
+                                         _external=True)
+                flash(f'{message}<br><br>Alternatively, you can verify manually using this link: <a href="{verification_url}" target="_blank">Verify Email</a><br><br><strong>To enable automatic emails:</strong> Configure SMTP settings in your .env file with your email credentials.', 'warning')
+            else:
+                flash(message, 'error')
+
+        return redirect(url_for('customer_verify', email=email))
+    except Exception as e:
+        app.logger.exception(f"Error in resend verification handler: {e}")
+        flash('An unexpected error occurred while resending verification email. Please try again.', 'error')
+        return redirect(url_for('customer_verify'))
+
+@app.route('/customer/security')
+@customer_login_required
+def customer_security():
+    """Customer security settings page."""
+    customer = request.current_customer
+    
+    # Check if MFA is enabled
+    mfa_enabled = customer_auth_service.is_customer_mfa_enabled(customer)
+    
+    # Get MFA setup data if not enabled
+    secret = None
+    qr_uri = None
+    if not mfa_enabled:
+        try:
+            secret, qr_uri = customer_auth_service.setup_customer_mfa(customer)
+        except Exception as e:
+            app.logger.error(f"Error setting up customer MFA: {e}")
+            flash('Error setting up MFA. Please try again.', 'error')
+    
+    return render_template('customer_security.html', 
+                         customer=customer, 
+                         mfa_enabled=mfa_enabled,
+                         secret=secret,
+                         qr_uri=qr_uri)
+
+@app.route('/customer/security/enable-mfa', methods=['POST'])
+@customer_login_required
+def enable_customer_mfa():
+    """Enable MFA for customer."""
+    customer = request.current_customer
+    otp_code = request.form.get('otp', '').strip()
+    
+    if not otp_code:
+        flash('Please enter the verification code from your authenticator app.', 'error')
+        return redirect(url_for('customer_security'))
+    
+    success, backup_codes, error_msg = customer_auth_service.enable_customer_mfa(customer, otp_code)
+    
+    if success:
+        flash('MFA enabled successfully! Please save your backup codes in a secure location.', 'success')
+        return render_template('customer_mfa_backup_codes.html', backup_codes=backup_codes)
+    else:
+        flash(f'Failed to enable MFA: {error_msg}', 'error')
+        return redirect(url_for('customer_security'))
+
+@app.route('/customer/security/disable-mfa', methods=['POST'])
+@customer_login_required
+def disable_customer_mfa():
+    """Disable MFA for customer."""
+    customer = request.current_customer
+    otp_code = request.form.get('otp', '').strip()
+    
+    if not otp_code:
+        flash('Please enter your authenticator code or backup code to disable MFA.', 'error')
+        return redirect(url_for('customer_security'))
+    
+    success, error_msg = customer_auth_service.disable_customer_mfa(customer, otp_code)
+    
+    if success:
+        flash('MFA has been disabled for your account.', 'warning')
+    else:
+        flash(f'Failed to disable MFA: {error_msg}', 'error')
+    
+    return redirect(url_for('customer_security'))
 
 @app.route('/customer/logout')
 @customer_login_required
 def customer_logout():
-    session.pop('customer_id', None)
-    flash('You have been logged out.', 'success')
-    return redirect(url_for('customer_login'))
+    customer = request.current_customer
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    
+    # Clear customer session using service
+    customer_auth_service.clear_customer_session()
+    
+    app.logger.info(f"Customer '{customer.email}' logged out from IP {client_ip}")
+    flash('You have been logged out successfully.', 'info')
+    return redirect(url_for('index'))
 
 @app.route('/customer/dashboard')
 @customer_login_required
 def customer_dashboard():
-    customer_id = session.get('customer_id')
-    customer = Customer.query.get_or_404(customer_id)
+    # Use the customer from request context (set by decorator)
+    customer = request.current_customer
+    
+    # Only fetch orders belonging to this customer (data isolation)
     orders = Order.query.filter_by(customer_email=customer.email).order_by(Order.created_at.desc()).all()
+    
     return render_template('customer_dashboard.html', customer=customer, orders=orders)
 
 @app.route('/admin/dashboard')
@@ -861,6 +1263,22 @@ def init_db():
     with app.app_context():
         db.create_all()
         
+        # Add new columns to Customer table if they don't exist
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('customer')]
+        
+        if 'email_verified' not in columns:
+            # Add email verification columns
+            from sqlalchemy import text
+            db.session.execute(text('''
+                ALTER TABLE customer 
+                ADD COLUMN email_verified BOOLEAN DEFAULT 0,
+                ADD COLUMN email_verification_token VARCHAR(100),
+                ADD COLUMN email_verification_sent_at DATETIME
+            '''))
+            print("Added email verification columns to customer table")
+        
         # Create default admin if it doesn't exist
         admin = Admin.query.filter_by(username='admin').first()
         if not admin:
@@ -987,45 +1405,75 @@ def admin_mfa():
         label = f"{current_user.username}"
         otp_uri = pyotp.TOTP(secret).provisioning_uri(name=label, issuer_name=issuer)
     
+    app.logger.info(f"Admin '{current_user.username}' accessed MFA settings page")
     return render_template('admin_mfa.html', sec=sec, secret=secret, otp_uri=otp_uri)
 
 @app.route('/admin/mfa/enable', methods=['POST'])
+@csrf.exempt
 @admin_required
 def admin_mfa_enable():
     code = request.form.get('otp', '').strip()
     secret = session.get('mfa_setup_secret')
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    
     if not secret:
         flash('MFA setup was not initiated. Please start setup again.', 'error')
+        app.logger.warning(f"MFA enable attempt without setup secret for admin '{current_user.username}' from IP {client_ip}")
         return redirect(url_for('admin_mfa'))
-    if not code or not pyotp.TOTP(secret).verify(code):
-        flash('Invalid verification code. Please try again.', 'error')
+    
+    if not code or len(code) != 6 or not code.isdigit():
+        flash('Please enter a valid 6-digit verification code.', 'error')
+        app.logger.warning(f"Invalid MFA code format from admin '{current_user.username}' from IP {client_ip}")
         return redirect(url_for('admin_mfa'))
+    
+    if not pyotp.TOTP(secret).verify(code):
+        flash('Invalid verification code. Please check your authenticator app and try again.', 'error')
+        app.logger.warning(f"Invalid MFA verification code for admin '{current_user.username}' from IP {client_ip}")
+        return redirect(url_for('admin_mfa'))
+    
     sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
     if not sec:
         sec = AdminSecurity(admin_id=current_user.id)
         db.session.add(sec)
+    
     sec.mfa_enabled = True
     sec.totp_secret = secret
     db.session.commit()
     session.pop('mfa_setup_secret', None)
-    flash('Multi-Factor Authentication has been enabled successfully.', 'success')
-    return redirect(url_for('admin_mfa'))
+    
+    flash('Multi-Factor Authentication has been enabled successfully! Your account is now more secure.', 'success')
+    app.logger.info(f"MFA enabled successfully for admin '{current_user.username}' from IP {client_ip}")
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/mfa/disable', methods=['POST'])
+@csrf.exempt
 @admin_required
 def admin_mfa_disable():
     code = request.form.get('otp', '').strip()
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
     sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
+    
     if not sec or not sec.mfa_enabled:
         flash('MFA is not currently enabled.', 'error')
+        app.logger.warning(f"MFA disable attempt when not enabled for admin '{current_user.username}' from IP {client_ip}")
         return redirect(url_for('admin_mfa'))
-    if not sec.totp_secret or not code or not pyotp.TOTP(sec.totp_secret).verify(code):
-        flash('Invalid code. Cannot disable MFA.', 'error')
+    
+    if not code or len(code) != 6 or not code.isdigit():
+        flash('Please enter a valid 6-digit verification code.', 'error')
+        app.logger.warning(f"Invalid MFA code format for disable attempt from admin '{current_user.username}' from IP {client_ip}")
         return redirect(url_for('admin_mfa'))
+    
+    if not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(code):
+        flash('Invalid verification code. Cannot disable MFA without proper authentication.', 'error')
+        app.logger.warning(f"Invalid MFA code for disable attempt from admin '{current_user.username}' from IP {client_ip}")
+        return redirect(url_for('admin_mfa'))
+    
     sec.mfa_enabled = False
     sec.totp_secret = None
     db.session.commit()
-    flash('Multi-Factor Authentication has been disabled.', 'success')
+    
+    flash('Multi-Factor Authentication has been disabled. Consider re-enabling it for better security.', 'warning')
+    app.logger.warning(f"MFA disabled for admin '{current_user.username}' from IP {client_ip}")
     return redirect(url_for('admin_mfa'))
 
 @app.route('/api/admin/revenue-timeseries')
@@ -1035,3 +1483,7 @@ def api_revenue_timeseries():
     status_arg = (request.args.get('status', '') or '').strip().lower()
     data = get_revenue_timeseries(db, Order, days, status_arg)
     return jsonify(data)
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True, host='127.0.0.1', port=5001)
