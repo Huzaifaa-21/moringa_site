@@ -128,10 +128,10 @@ class CustomerAuthService:
         customer = self.Customer.query.filter_by(email=email.lower().strip()).first()
         
         if not customer:
-            return False, "Customer not found"
+            return False, "Customer not found", None
         
         if customer.email_verified:
-            return False, "Email is already verified"
+            return False, "Email is already verified", None
         
         # Check rate limiting (minimum 10 seconds between resends)
         last_sent = customer.email_verification_sent_at
@@ -150,7 +150,7 @@ class CustomerAuthService:
                 time_since_last = datetime.now(timezone.utc) - last_sent
                 if time_since_last < timedelta(seconds=10):
                     seconds_left = int((timedelta(seconds=10) - time_since_last).total_seconds()) + 1
-                    return False, f"Please wait {seconds_left} seconds before requesting another verification email"
+                    return False, f"Please wait {seconds_left} seconds before requesting another verification email", None
         except Exception as e:
             # Do not block resend due to unexpected type issues; log and continue
             self.logger.error("Rate limit computation error for %s: %s", customer.email, e)
@@ -163,9 +163,12 @@ class CustomerAuthService:
         
         # In production, construct proper URL
         verification_url = url_for('verify_customer_email', token=token, _external=True)
-        self.send_verification_email(customer, verification_url)
+        sent = self.send_verification_email(customer, verification_url)
         
-        return True, "Verification email sent successfully"
+        if sent:
+            return True, "Verification email sent successfully", verification_url
+        else:
+            return False, "Email not sent. You can verify manually using the link below.", verification_url
     
     def setup_customer_mfa(self, customer):
         """

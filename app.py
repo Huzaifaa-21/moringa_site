@@ -788,7 +788,7 @@ def resend_customer_verification():
             return redirect(url_for('customer_verify'))
 
         email = form.email.data.strip().lower()
-        success, message = customer_auth_service.resend_verification_email(email)
+        success, message, verification_url = customer_auth_service.resend_verification_email(email)
 
         # Persist email on session to prefill the verify page
         session['pending_verification_email'] = email
@@ -796,12 +796,9 @@ def resend_customer_verification():
         if success:
             flash(message, 'success')
         else:
-            # Check if it's a configuration issue
-            if 'SMTP configuration missing' in str(message) or not os.getenv('SMTP_USER') or not os.getenv('SMTP_PASS'):
-                verification_url = url_for('verify_customer_email', 
-                                         token=customer_auth_service.generate_verification_token(), 
-                                         _external=True)
-                flash(f'{message}<br><br>Alternatively, you can verify manually using this link: <a href="{verification_url}" target="_blank">Verify Email</a><br><br><strong>To enable automatic emails:</strong> Configure SMTP settings in your .env file with your email credentials.', 'warning')
+            # If a new token was generated, provide manual verification link
+            if verification_url:
+                flash(f'{message}<br><br>Manual verification link: <a href="{verification_url}" target="_blank">Verify Email</a><br><br><strong>To enable automatic emails:</strong> Configure SMTP settings in your .env file with your email credentials.', 'warning')
             else:
                 flash(message, 'error')
 
