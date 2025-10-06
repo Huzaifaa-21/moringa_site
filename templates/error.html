@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error {{ error_code }} - Pure Moringa</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        .error-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+        }
+        
+        .error-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        
+        .error-icon {
+            font-size: 4rem;
+            color: #e74c3c;
+            margin-bottom: 20px;
+        }
+        
+        .error-code {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .error-message {
+            font-size: 1.2rem;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        
+        .error-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: var(--primary-color, #27ae60);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark, #219a52);
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: #ecf0f1;
+            color: #2c3e50;
+        }
+        
+        .btn-secondary:hover {
+            background: #d5dbdb;
+            transform: translateY(-2px);
+        }
+        
+        .error-details {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            text-align: left;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        .error-id {
+            margin-top: 20px;
+            font-size: 0.8rem;
+            color: #95a5a6;
+        }
+        
+        @media (max-width: 768px) {
+            .error-card {
+                padding: 30px 20px;
+            }
+            
+            .error-code {
+                font-size: 2.5rem;
+            }
+            
+            .error-message {
+                font-size: 1.1rem;
+            }
+            
+            .error-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body data-error-code="{{ error_code }}" data-error-message="{{ error_message|replace('"', '&quot;') }}">
+    <div class="error-container">
+        <div class="error-card">
+            <div class="error-icon">
+                {% if error_code == 404 %}
+                    <i class="fas fa-search"></i>
+                {% elif error_code == 403 %}
+                    <i class="fas fa-lock"></i>
+                {% elif error_code == 401 %}
+                    <i class="fas fa-user-slash"></i>
+                {% elif error_code == 429 %}
+                    <i class="fas fa-clock"></i>
+                {% elif error_code == 500 %}
+                    <i class="fas fa-server"></i>
+                {% elif error_code == 503 %}
+                    <i class="fas fa-tools"></i>
+                {% else %}
+                    <i class="fas fa-exclamation-triangle"></i>
+                {% endif %}
+            </div>
+            
+            <div class="error-code">{{ error_code }}</div>
+            
+            <div class="error-message">
+                {{ error_message }}
+            </div>
+            
+            <div class="error-actions">
+                <a href="/" class="btn btn-primary">
+                    <i class="fas fa-home"></i>
+                    Go Home
+                </a>
+                
+                <a href="javascript:history.back()" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i>
+                    Go Back
+                </a>
+                
+                {% if error_code == 404 %}
+                <a href="/customer/login" class="btn btn-secondary">
+                    <i class="fas fa-sign-in-alt"></i>
+                    Login
+                </a>
+                {% endif %}
+            </div>
+            
+            {% if show_details and error_id %}
+            <div class="error-details">
+                <strong>Error ID:</strong> {{ error_id }}<br>
+                <strong>Timestamp:</strong> {{ moment().format('YYYY-MM-DD HH:mm:ss UTC') }}<br>
+                <strong>Path:</strong> {{ request.path if request else 'Unknown' }}<br>
+                
+                {% if error_code >= 500 %}
+                <br>
+                <em>If this error persists, please contact support with the Error ID above.</em>
+                {% endif %}
+            </div>
+            {% endif %}
+            
+            {% if error_id %}
+            <div class="error-id">
+                Error ID: {{ error_id }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <script>
+        // Get error data from data attributes
+        const errorCode = parseInt(document.body.dataset.errorCode);
+        const errorMessage = document.body.dataset.errorMessage;
+        
+        // Auto-refresh for 503 errors
+        if (errorCode === 503) {
+            setTimeout(function() {
+                window.location.reload();
+            }, 30000); // Refresh after 30 seconds
+        }
+        
+        // Track error for analytics (if available)
+        if (typeof gtag !== 'undefined') {
+            gtag('event', 'exception', {
+                'description': 'Error ' + errorCode + ': ' + errorMessage,
+                'fatal': errorCode >= 500
+            });
+        }
+    </script>
+</body>
+</html>

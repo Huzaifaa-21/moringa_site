@@ -45,9 +45,14 @@
     .status.cancelled { background: #ffe5e5; color: #b00020; }
     .status.cancelled::before { background:#ef4444; }
 
-    .action-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; text-decoration: none; font-weight: 700; transition: transform .15s ease, box-shadow .2s ease; }
+    .action-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; text-decoration: none; font-weight: 700; transition: transform .15s ease, box-shadow .2s ease; font-size: 12px; }
     .action-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(46,125,50,0.18); }
     .btn-primary { background: var(--brand); color: #fff; }
+    .btn-outline { background: #fff; color: var(--brand); border: 2px solid var(--brand); }
+    .btn-outline:hover { background: var(--brand); color: #fff; box-shadow: 0 6px 14px rgba(46,125,50,0.18); }
+    .actions { white-space: nowrap; }
+    .receipt-btn { background: #1976d2; color: #fff; }
+    .receipt-btn:hover { background: #1565c0; box-shadow: 0 6px 14px rgba(25,118,210,0.18); }
     .btn-primary:hover { background: var(--brand-2); }
     .btn-outline { border: 1.5px solid var(--brand); color: var(--brand); }
     .btn-outline:hover { background: #eaf4ea; }
@@ -113,9 +118,13 @@
                 <td>{{ order.created_at.strftime('%d %b %Y, %I:%M %p') }}</td>
                 <td class="actions">
                   {% if order.razorpay_payment_id %}
-                    <a class="action-btn btn-outline" href="/api/generate-receipt/{{ order.id }}" target="_blank"><i class="fas fa-file-pdf"></i> Receipt</a>
+                    <a class="action-btn receipt-btn" href="/api/generate-receipt/{{ order.id }}" target="_blank" title="Download PDF Receipt">
+                      <i class="fas fa-file-pdf"></i> Receipt
+                    </a>
                   {% else %}
-                    <span title="Receipt available after payment" style="color:#666;">N/A</span>
+                    <span title="Receipt available after payment" style="color:#666; font-size: 12px;">
+                      <i class="fas fa-clock"></i> Pending
+                    </span>
                   {% endif %}
                 </td>
               </tr>

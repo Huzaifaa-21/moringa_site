@@ -34,6 +34,16 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///moringa_orders.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Enhanced session configuration for security
+app.config['SESSION_COOKIE_SECURE'] = not app.debug  # HTTPS only in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent XSS access to cookies
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)  # Default session lifetime
+app.config['SESSION_COOKIE_NAME'] = 'moringa_session'  # Custom session cookie name
+
+# Security headers configuration
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = timedelta(hours=1)  # Cache control for static files
+
 # Initialize extensions
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -42,31 +52,13 @@ login_manager.login_view = 'admin_login'
 
 
 def admin_required(f):
+    """Legacy admin_required decorator - will be replaced with secure_admin_required"""
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not current_user.is_authenticated:
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('admin_login'))
-        
-        # Check if MFA is configured for this admin
-        sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
-        
-        # Always require MFA setup - no exceptions for new users
-        if not sec or not sec.mfa_enabled:
-            # Create AdminSecurity record if it doesn't exist (but don't commit yet)
-            if not sec:
-                sec = AdminSecurity(admin_id=current_user.id, mfa_enabled=False)
-                db.session.add(sec)
-                db.session.commit()
-            
-            # Redirect to mandatory MFA setup (except for MFA routes and logout)
-            if not request.path.startswith('/admin/mfa') and request.path != '/admin/logout':
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': 'MFA setup required', 'redirect': '/admin/mfa'}), 403
-                flash('Multi-Factor Authentication setup is required for security. Please configure MFA to continue.', 'warning')
-                return redirect(url_for('admin_mfa'))
-        
         return f(*args, **kwargs)
     return wrapper
 
@@ -147,40 +139,11 @@ customer_auth_service = CustomerAuthService(db, Customer, Order, CustomerSecurit
 # Initialize secure customer API
 create_customer_orders_api(app, db, Customer, Order, customer_auth_service)
 
-def customer_owns_resource(resource_check_func):
-    """
-    Decorator to ensure customer can only access their own resources.
-    resource_check_func should return True if customer owns the resource.
-    """
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            customer_id = session.get('customer_id')
-            if not customer_id:
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': 'Authentication required'}), 401
-                return redirect(url_for('customer_login'))
-            
-            customer = Customer.query.get(customer_id)
-            if not customer:
-                session.pop('customer_id', None)
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': 'Invalid session'}), 401
-                return redirect(url_for('customer_login'))
-            
-            # Check if customer owns the resource
-            if not resource_check_func(customer, *args, **kwargs):
-                client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
-                app.logger.warning(f"Customer '{customer.email}' attempted unauthorized access to {request.path} from IP {client_ip}")
-                if request.path.startswith('/api/'):
-                    return jsonify({'error': 'Access denied'}), 403
-                flash('You do not have permission to access this resource.', 'error')
-                return redirect(url_for('customer_dashboard'))
-            
-            request.current_customer = customer
-            return f(*args, **kwargs)
-        return wrapper
-    return decorator
+# Import enhanced authentication after models and APIs are set up
+from services.enhanced_auth import secure_admin_required, secure_customer_required, admin_route_required, rate_limited, csrf_protected, security_headers, admin_or_customer_required
+from services.security_config import session_manager, auth_security
+
+# Legacy decorator removed - now using enhanced authentication system
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -197,8 +160,25 @@ def generate_order_id():
 
 # Routes
 @app.route('/')
+@security_headers
 def index():
-    resp = make_response(render_template('index.html', PLAUSIBLE_DOMAIN=os.getenv('PLAUSIBLE_DOMAIN')))
+    """
+    Main website index - public access only.
+    
+    Admins should access the admin panel via /admin/ routes.
+    This prevents automatic admin login at the root URL.
+    """
+    # If an admin is logged in, show a notice but don't grant admin privileges here
+    admin_notice = False
+    if current_user.is_authenticated and hasattr(current_user, 'username'):
+        # Validate the admin session
+        session_validation = session_manager.validate_session()
+        if session_validation['valid'] and session_manager.is_admin_session():
+            admin_notice = True
+    
+    resp = make_response(render_template('index.html', 
+                                       PLAUSIBLE_DOMAIN=os.getenv('PLAUSIBLE_DOMAIN'),
+                                       admin_notice=admin_notice))
     try:
         from flask_wtf.csrf import generate_csrf
         token = generate_csrf()
@@ -349,25 +329,26 @@ def verify_payment():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Helper function to check if customer owns an order
-def customer_owns_order(customer, order_id):
-    """Check if the customer owns the specified order."""
-    order = Order.query.get(order_id)
-    if not order:
-        return False
-    return order.customer_email == customer.email
+# Legacy function removed - now using enhanced authentication system
 
 @app.route('/api/generate-receipt/<int:order_id>')
-@customer_owns_resource(customer_owns_order)
+@admin_or_customer_required
+@security_headers
 def generate_receipt(order_id):
     try:
-        # Customer ownership already verified by decorator
         order = Order.query.get_or_404(order_id)
-        customer = request.current_customer
         
-        # Double-check ownership for extra security
-        if order.customer_email != customer.email:
-            app.logger.warning(f"Customer '{customer.email}' attempted to access order {order_id} belonging to '{order.customer_email}'")
+        # Check access permissions
+        if current_user.is_authenticated and session_manager.is_admin_session():
+            # Admin can access any receipt
+            app.logger.info(f"Admin '{current_user.username}' generating receipt for order {order_id}")
+        elif hasattr(request, 'current_customer'):
+            # Customer can only access their own receipts
+            customer = request.current_customer
+            if order.customer_email != customer.email:
+                app.logger.warning(f"Customer '{customer.email}' attempted to access order {order_id} belonging to '{order.customer_email}'")
+                return jsonify({'error': 'Access denied'}), 403
+        else:
             return jsonify({'error': 'Access denied'}), 403
         
         # Create PDF
@@ -452,42 +433,38 @@ class AdminLoginForm(FlaskForm):
     remember_me = BooleanField('Remember me')
     submit = SubmitField('Login')
 
-@csrf.exempt
 @app.route('/admin/login', methods=['GET', 'POST'])
+@admin_route_required
+@rate_limited('admin_login', lambda: request.form.get('username', request.remote_addr))
+@security_headers
 def admin_login():
-    form = AdminLoginForm()
+    """
+    Secure admin login with enhanced session management.
     
-    # Rate limiting check
-    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
-    login_attempts_key = f"login_attempts_{client_ip}"
-    lockout_key = f"login_lockout_{client_ip}"
-    
-    # Check if IP is locked out
-    if session.get(lockout_key):
-        lockout_time = session.get(f"{lockout_key}_time", 0)
-        if datetime.now().timestamp() - lockout_time < 900:  # 15 minutes lockout
-            app.logger.warning(f"Login attempt from locked out IP: {client_ip}")
-            flash('Too many failed login attempts. Please try again in 15 minutes.', 'error')
-            return render_template('admin_login.html', form=form)
+    Features:
+    - Rate limiting (handled by decorator)
+    - MFA support
+    - Enhanced session creation
+    - Security logging
+    """
+    # If already logged in with valid session, redirect to dashboard
+    if current_user.is_authenticated:
+        session_validation = session_manager.validate_session()
+        if session_validation['valid'] and session_manager.is_admin_session():
+            return redirect(url_for('admin_dashboard'))
         else:
-            # Clear lockout after timeout
-            session.pop(lockout_key, None)
-            session.pop(f"{lockout_key}_time", None)
-            session.pop(login_attempts_key, None)
+            # Invalid session, clear it
+            session_manager.clear_session()
+            logout_user()
+    
+    form = AdminLoginForm()
     
     if request.method == 'POST' and request.is_json:
         data = request.get_json()
         username = (data.get('username') or '').strip().lower()
         password = data.get('password')
         otp_val = data.get('otp')
-        
-        # Check rate limiting
-        attempts = session.get(login_attempts_key, 0)
-        if attempts >= 5:
-            session[lockout_key] = True
-            session[f"{lockout_key}_time"] = datetime.now().timestamp()
-            app.logger.warning(f"IP {client_ip} locked out after 5 failed attempts")
-            return jsonify({'error': 'Too many failed attempts. Account locked for 15 minutes.'}), 429
+        remember_me = data.get('remember_me', False)
         
         admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == username).first()
         if admin and check_password_hash(admin.password_hash, password):
@@ -502,36 +479,34 @@ def admin_login():
             # If MFA is enabled, require OTP code
             if sec.mfa_enabled:
                 if not otp_val or not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(otp_val):
-                    session[login_attempts_key] = attempts + 1
-                    app.logger.warning(f"Invalid MFA code for admin '{username}' from IP {client_ip}")
+                    auth_security.record_failed_attempt(username, 'admin_login')
+                    app.logger.warning(f"Invalid MFA code for admin '{username}' from IP {request.remote_addr}")
                     return jsonify({'error': 'Invalid MFA code'}), 401
             
-            # Successful login - clear rate limiting
-            session.pop(login_attempts_key, None)
-            session.pop(lockout_key, None)
-            session.pop(f"{lockout_key}_time", None)
+            # Successful login - clear failed attempts and create secure session
+            auth_security.clear_failed_attempts(username, 'admin_login')
             
-            login_user(admin)
-            app.logger.info(f"Admin '{username}' logged in successfully via JSON from IP {client_ip}")
+            # Use Flask-Login for user management
+            login_user(admin, remember=remember_me)
+            
+            # Create enhanced session
+            session_data = session_manager.create_admin_session(
+                admin_id=admin.id,
+                username=admin.username,
+                remember_me=remember_me
+            )
+            
+            app.logger.info(f"Admin '{username}' logged in successfully via JSON from IP {request.remote_addr}")
             return jsonify({'status': 'success', 'redirect': '/admin/dashboard'})
         
         # Failed login
-        session[login_attempts_key] = attempts + 1
-        app.logger.warning(f"Failed login attempt for '{username}' from IP {client_ip} (attempt {attempts + 1})")
+        auth_security.record_failed_attempt(username or request.remote_addr, 'admin_login')
+        app.logger.warning(f"Failed login attempt for '{username}' from IP {request.remote_addr}")
         return jsonify({'error': 'Invalid credentials'}), 401
 
     if request.method == 'POST':
         if form.validate_on_submit():
             username_input = (form.username.data or '').strip().lower()
-            
-            # Check rate limiting
-            attempts = session.get(login_attempts_key, 0)
-            if attempts >= 5:
-                session[lockout_key] = True
-                session[f"{lockout_key}_time"] = datetime.now().timestamp()
-                app.logger.warning(f"IP {client_ip} locked out after 5 failed attempts")
-                flash('Too many failed login attempts. Please try again in 15 minutes.', 'error')
-                return render_template('admin_login.html', form=form)
             
             admin = db.session.query(Admin).filter(db.func.lower(Admin.username) == username_input).first()
             if admin and check_password_hash(admin.password_hash, form.password.data):
@@ -547,28 +522,31 @@ def admin_login():
                 if sec.mfa_enabled:
                     otp_val = form.otp.data
                     if not otp_val or not sec.totp_secret or not pyotp.TOTP(sec.totp_secret).verify(otp_val):
-                        session[login_attempts_key] = attempts + 1
+                        auth_security.record_failed_attempt(username_input, 'admin_login')
                         flash('Invalid MFA code. Please check your authenticator app and try again.', 'error')
-                        app.logger.warning(f"Invalid MFA code for admin '{username_input}' from IP {client_ip}")
+                        app.logger.warning(f"Invalid MFA code for admin '{username_input}' from IP {request.remote_addr}")
                         return render_template('admin_login.html', form=form)
                 
-                # Successful login - clear rate limiting
-                session.pop(login_attempts_key, None)
-                session.pop(lockout_key, None)
-                session.pop(f"{lockout_key}_time", None)
+                # Successful login - clear failed attempts and create secure session
+                auth_security.clear_failed_attempts(username_input, 'admin_login')
                 
+                # Use Flask-Login for user management
                 login_user(admin, remember=form.remember_me.data)
-                app.logger.info(f"Admin '{username_input}' logged in successfully from IP {client_ip}")
+                
+                # Create enhanced session
+                session_data = session_manager.create_admin_session(
+                    admin_id=admin.id,
+                    username=admin.username,
+                    remember_me=form.remember_me.data
+                )
+                
+                app.logger.info(f"Admin '{username_input}' logged in successfully from IP {request.remote_addr}")
                 return redirect(url_for('admin_dashboard'))
             
             # Failed login
-            session[login_attempts_key] = attempts + 1
-            remaining_attempts = 5 - (attempts + 1)
-            if remaining_attempts > 0:
-                flash(f'Invalid credentials. {remaining_attempts} attempts remaining before lockout.', 'error')
-            else:
-                flash('Invalid credentials. Account will be locked after next failed attempt.', 'error')
-            app.logger.warning(f"Failed login attempt for '{username_input}' from IP {client_ip} (attempt {attempts + 1})")
+            auth_security.record_failed_attempt(username_input or request.remote_addr, 'admin_login')
+            flash('Invalid credentials. Please check your username and password.', 'error')
+            app.logger.warning(f"Failed login attempt for '{username_input}' from IP {request.remote_addr}")
         else:
             # Form validation failed
             if hasattr(form, 'csrf_token') and form.csrf_token.errors:
@@ -668,6 +646,8 @@ def customer_register():
     return render_template('customer_register.html', form=form)
 
 @app.route('/customer/login', methods=['GET', 'POST'])
+@rate_limited('customer_login', lambda: request.form.get('email', request.remote_addr))
+@security_headers
 def customer_login():
     form = CustomerLoginForm()
     
@@ -874,10 +854,14 @@ def disable_customer_mfa():
     return redirect(url_for('customer_security'))
 
 @app.route('/customer/logout')
-@customer_login_required
+@secure_customer_required
+@security_headers
 def customer_logout():
+    """Secure customer logout with proper session cleanup."""
     customer = request.current_customer
-    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
+    
+    # Clear enhanced session
+    session_manager.clear_session()
     
     # Clear customer session using service
     customer_auth_service.clear_customer_session()
@@ -898,7 +882,9 @@ def customer_dashboard():
     return render_template('customer_dashboard.html', customer=customer, orders=orders)
 
 @app.route('/admin/dashboard')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def admin_dashboard():
     # Get filter parameters from request
     page = request.args.get('page', 1, type=int)
@@ -1010,14 +996,27 @@ def admin_dashboard():
                          monthly_revenue=monthly_revenue)
 
 @app.route('/admin/logout')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def admin_logout():
+    """Secure admin logout with proper session cleanup."""
+    username = current_user.username if current_user.is_authenticated else 'unknown'
+    
+    # Clear enhanced session
+    session_manager.clear_session()
+    
+    # Flask-Login logout
     logout_user()
-    flash('You have been logged out.', 'success')
+    
+    app.logger.info(f"Admin '{username}' logged out from IP {request.remote_addr}")
+    flash('You have been logged out successfully.', 'info')
     return redirect(url_for('admin_login'))
 
 @app.route('/api/admin/orders')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def get_orders():
     try:
         page = request.args.get('page', 1, type=int)
@@ -1090,7 +1089,9 @@ def images(filename):
     return send_from_directory('images', filename)
 
 @app.route('/api/admin/orders/<int:order_id>')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def api_admin_order_detail(order_id):
     try:
         order = Order.query.get_or_404(order_id)
@@ -1115,8 +1116,10 @@ def api_admin_order_detail(order_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/edit', methods=['PUT'])
-@csrf.exempt
-@admin_required
+@secure_admin_required
+@admin_route_required
+@csrf_protected
+@security_headers
 def edit_order(order_id):
     try:
         order = Order.query.get_or_404(order_id)
@@ -1165,8 +1168,10 @@ def edit_order(order_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/status', methods=['PUT'])
-@csrf.exempt
-@admin_required
+@secure_admin_required
+@admin_route_required
+@csrf_protected
+@security_headers
 def update_order_status(order_id):
     try:
         order = Order.query.get_or_404(order_id)
@@ -1196,8 +1201,10 @@ def update_order_status(order_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<int:order_id>/delete', methods=['DELETE'])
-@csrf.exempt
-@admin_required
+@secure_admin_required
+@admin_route_required
+@csrf_protected
+@security_headers
 def delete_order(order_id):
     try:
         order = Order.query.get_or_404(order_id)
@@ -1213,7 +1220,9 @@ def delete_order(order_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/export-orders')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def export_orders():
     try:
         # Get all orders
@@ -1383,7 +1392,9 @@ def run_server():
     app.run(debug=True, host=host, port=port, use_reloader=False)
 
 @app.route('/admin/mfa')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def admin_mfa():
     sec = AdminSecurity.query.filter_by(admin_id=current_user.id).first()
     if not sec:
@@ -1406,8 +1417,10 @@ def admin_mfa():
     return render_template('admin_mfa.html', sec=sec, secret=secret, otp_uri=otp_uri)
 
 @app.route('/admin/mfa/enable', methods=['POST'])
-@csrf.exempt
-@admin_required
+@secure_admin_required
+@admin_route_required
+@csrf_protected
+@security_headers
 def admin_mfa_enable():
     code = request.form.get('otp', '').strip()
     secret = session.get('mfa_setup_secret')
@@ -1443,8 +1456,10 @@ def admin_mfa_enable():
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/mfa/disable', methods=['POST'])
-@csrf.exempt
-@admin_required
+@secure_admin_required
+@admin_route_required
+@csrf_protected
+@security_headers
 def admin_mfa_disable():
     code = request.form.get('otp', '').strip()
     client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
@@ -1474,7 +1489,9 @@ def admin_mfa_disable():
     return redirect(url_for('admin_mfa'))
 
 @app.route('/api/admin/revenue-timeseries')
-@admin_required
+@secure_admin_required
+@admin_route_required
+@security_headers
 def api_revenue_timeseries():
     days = request.args.get('days', 30, type=int)
     status_arg = (request.args.get('status', '') or '').strip().lower()

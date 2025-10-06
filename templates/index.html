@@ -28,7 +28,10 @@
                     <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="about">About</a></li>
                     <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="order">Order</a></li>
                     <li role="none"><a href="#" class="nav-link" role="menuitem" data-page="contact">Contact</a></li>
-                    {% if session.get('customer_id') %}
+                    {% if admin_notice %}
+                    <li role="none"><a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a></li>
+                    <li role="none"><a href="{{ url_for('admin_logout') }}">Admin Logout</a></li>
+                    {% elif session.get('customer_id') %}
                     <li role="none"><a href="{{ url_for('customer_dashboard') }}">Dashboard</a></li>
                     <li role="none"><a href="{{ url_for('customer_logout') }}">Logout</a></li>
                     {% else %}
@@ -249,7 +252,12 @@
                         <p><i class="fas fa-undo"></i> Hassle-free returns within 7 days if unopened</p>
                     </div>
 
-                    {% if not session.get('customer_id') %}
+                    {% if admin_notice %}
+                    <div class="admin-viewing-notice" style="margin: 1rem 0; padding: 0.75rem 1rem; background:#fff3cd; border:1px solid #ffeaa7; border-radius:8px;">
+                        <i class="fas fa-user-shield"></i> You are viewing the website as an admin. 
+                        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary" style="margin-left:0.5rem;">Back to Dashboard</a>
+                    </div>
+                    {% elif not session.get('customer_id') %}
                     <div class="login-prompt" style="margin: 1rem 0; padding: 0.75rem 1rem; background:#f0f7ff; border:1px solid #cfe4ff; border-radius:8px;">
                         Returning customer? <a href="{{ url_for('customer_login') }}" class="btn btn-secondary" style="margin-left:0.5rem;">Log in</a>
                         <span style="margin:0 0.5rem;">or</span>
@@ -384,7 +392,10 @@
                         <li><a href="#" class="nav-link" data-page="about">About</a></li>
                         <li><a href="#" class="nav-link" data-page="order">Order</a></li>
                         <li><a href="#" class="nav-link" data-page="contact">Contact</a></li>
-                        {% if session.get('customer_id') %}
+                        {% if admin_notice %}
+                            <li><a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a></li>
+                            <li><a href="{{ url_for('admin_logout') }}">Admin Logout</a></li>
+                        {% elif session.get('customer_id') %}
                         <li><a href="{{ url_for('customer_dashboard') }}">Dashboard</a></li>
                         <li><a href="{{ url_for('customer_logout') }}">Logout</a></li>
                         {% else %}

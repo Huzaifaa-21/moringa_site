@@ -21,6 +21,9 @@ def create_customer_orders_api(app, db, Customer, Order, customer_auth_service):
         Order: Order model
         customer_auth_service: CustomerAuthService instance
     """
+    # Check if blueprint is already registered to prevent duplicate registration
+    if 'customer_orders' in app.blueprints:
+        return app.blueprints['customer_orders']
     
     logger = logging.getLogger(__name__)
     
@@ -224,7 +227,8 @@ def create_customer_orders_api(app, db, Customer, Order, customer_auth_service):
             logger.error(f"Error updating customer profile: {str(e)}")
             return jsonify({'error': 'Internal server error'}), 500
     
-    # Register blueprint with app
-    app.register_blueprint(customer_orders_bp)
+    # Register blueprint with app only if not already registered
+    if 'customer_orders' not in app.blueprints:
+        app.register_blueprint(customer_orders_bp)
     
     return customer_orders_bp
