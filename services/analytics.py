@@ -11,7 +11,7 @@ def get_revenue_timeseries(db, Order, days: int, status_arg: str) -> Dict[str, L
         db: SQLAlchemy db instance.
         Order: Order model class.
         days: Number of days to include.
-        status_arg: Optional status filter string; defaults to paid/fulfilled statuses.
+        status_arg: Optional status filter string (comma-separated for multiple); defaults to paid/fulfilled statuses.
 
     Returns:
         Dict with keys: labels, revenue, orders.
@@ -20,7 +20,17 @@ def get_revenue_timeseries(db, Order, days: int, status_arg: str) -> Dict[str, L
     start_date = now - timedelta(days=days - 1)
 
     known_statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
-    statuses = [status_arg] if (status_arg and status_arg.lower() in known_statuses) else ['processing', 'shipped', 'delivered']
+    
+    # Handle multiple status filters (comma-separated)
+    if status_arg and status_arg.strip():
+        requested_statuses = [s.strip().lower() for s in status_arg.split(',') if s.strip()]
+        statuses = [s for s in requested_statuses if s in known_statuses]
+        # If no valid statuses provided, fall back to default
+        if not statuses:
+            statuses = ['processing', 'shipped', 'delivered']
+    else:
+        # Default to paid/fulfilled statuses
+        statuses = ['processing', 'shipped', 'delivered']
 
     rows = (
         db.session.query(

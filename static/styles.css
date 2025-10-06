@@ -965,3 +965,200 @@ tr:hover {
 .shipping-info p i {
     margin-right: 10px;
 }
+
+/* Multi-select Status Filter Styles */
+.status-multiselect, .analytics-status-multiselect {
+    position: relative;
+    min-width: 200px;
+}
+
+.multiselect-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    border: 1px solid #ddd;
+    border-radius: var(--border-radius);
+    background: var(--white);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+}
+
+.multiselect-header:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.1);
+}
+
+.multiselect-header i {
+    transition: transform 0.3s ease;
+    color: #666;
+}
+
+.multiselect-header.active i {
+    transform: rotate(180deg);
+}
+
+.multiselect-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--white);
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 var(--border-radius) var(--border-radius);
+    box-shadow: var(--shadow);
+    z-index: 1000;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 15px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.checkbox-item:last-child {
+    border-bottom: none;
+}
+
+.checkbox-item:hover {
+    background-color: #f8f9fa;
+}
+
+.checkbox-item input[type="checkbox"] {
+    display: none;
+}
+
+.checkmark {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #ddd;
+    border-radius: 3px;
+    margin-right: 10px;
+    position: relative;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.checkbox-item input[type="checkbox"]:checked + .checkmark {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.checkbox-item input[type="checkbox"]:checked + .checkmark::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 2px;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-pending {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.status-processing {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+.status-shipped {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.status-delivered {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.status-cancelled {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Analytics specific styles */
+.analytics-status-indicator {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(21, 128, 61, 0.1));
+    border: 2px solid rgba(34, 197, 94, 0.3);
+    border-radius: 8px;
+    font-weight: 600;
+    color: #15803d;
+    box-shadow: 0 2px 4px rgba(34, 197, 94, 0.1);
+    transition: all 0.3s ease;
+}
+
+.analytics-status-indicator:hover {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(21, 128, 61, 0.15));
+    border-color: rgba(34, 197, 94, 0.5);
+    box-shadow: 0 4px 8px rgba(34, 197, 94, 0.2);
+}
+
+.analytics-status-indicator .status-badge {
+    font-size: 12px;
+    padding: 4px 8px;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-weight: inherit;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .status-multiselect, .analytics-status-multiselect {
+        min-width: 150px;
+    }
+    
+    .multiselect-header {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+    
+    .checkbox-item {
+        padding: 8px 12px;
+    }
+    
+    .status-badge {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+}
+
+/* Close dropdown when clicking outside */
+.multiselect-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 999;
+}

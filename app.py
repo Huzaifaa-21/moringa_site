@@ -889,7 +889,7 @@ def admin_dashboard():
     # Get filter parameters from request
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
-    status_filter = request.args.get('status', '')
+    status_filters = request.args.getlist('status')  # Support multiple status filters
     search_query = request.args.get('search', '')
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
@@ -897,9 +897,9 @@ def admin_dashboard():
     # Build query for orders
     orders_query = Order.query
     
-    # Apply status filter
-    if status_filter:
-        orders_query = orders_query.filter(Order.status == status_filter)
+    # Apply status filters (multiple selection support)
+    if status_filters:
+        orders_query = orders_query.filter(Order.status.in_(status_filters))
     
     # Apply search filter
     if search_query:
@@ -1494,7 +1494,9 @@ def admin_mfa_disable():
 @security_headers
 def api_revenue_timeseries():
     days = request.args.get('days', 30, type=int)
-    status_arg = (request.args.get('status', '') or '').strip().lower()
+    status_filters = request.args.getlist('status')  # Support multiple status filters
+    # Convert to comma-separated string for analytics service compatibility
+    status_arg = ','.join(status_filters) if status_filters else ''
     data = get_revenue_timeseries(db, Order, days, status_arg)
     return jsonify(data)
 

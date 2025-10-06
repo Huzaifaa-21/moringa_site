@@ -55,12 +55,10 @@
                         <option value="30" selected>Last 30 days</option>
                         <option value="90">Last 90 days</option>
                     </select>
-                    <select id="analytics-status" onchange="updateAnalytics()">
-                        <option value="">All Statuses</option>
-                        <option value="processing">Processing</option>
-                        <option value="shipped">Shipped</option>
-                        <option value="delivered">Delivered</option>
-                    </select>
+                    <div class="analytics-status-indicator">
+                        <i class="fas fa-check-circle" style="color: #22c55e; margin-right: 8px;"></i>
+                        <span class="status-badge status-delivered">Delivered Orders Only</span>
+                    </div>
                 </div>
             </div>
             <div class="chart-container">
@@ -77,15 +75,44 @@
             <form method="GET" id="filter-form">
                 <div class="filter-row">
                     <div class="form-group">
-                        <label for="status">Status:</label>
-                        <select name="status" id="status" onchange="document.getElementById('filter-form').submit();">
-                            <option value="">All Statuses</option>
-                            <option value="pending" {{ 'selected' if request.args.get('status') == 'pending' }}>Pending</option>
-                            <option value="processing" {{ 'selected' if request.args.get('status') == 'processing' }}>Processing</option>
-                            <option value="shipped" {{ 'selected' if request.args.get('status') == 'shipped' }}>Shipped</option>
-                            <option value="delivered" {{ 'selected' if request.args.get('status') == 'delivered' }}>Delivered</option>
-                            <option value="cancelled" {{ 'selected' if request.args.get('status') == 'cancelled' }}>Cancelled</option>
-                        </select>
+                        <label>Status:</label>
+                        <div class="status-multiselect">
+                            <div class="multiselect-header" onclick="toggleStatusDropdown()">
+                                <span id="status-display">All Statuses</span>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                            <div class="multiselect-dropdown" id="status-dropdown" style="display: none;">
+                                {% set selected_statuses = request.args.getlist('status') %}
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="status" value="pending" 
+                                           {{ 'checked' if 'pending' in selected_statuses }} 
+                                           onchange="updateStatusFilter()">
+                                    <span class="checkmark"></span>
+                                    <span class="status-badge status-pending">Pending</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="status" value="processing" 
+                                           {{ 'checked' if 'processing' in selected_statuses }} 
+                                           onchange="updateStatusFilter()">
+                                    <span class="checkmark"></span>
+                                    <span class="status-badge status-processing">Processing</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="status" value="delivered" 
+                                           {{ 'checked' if 'delivered' in selected_statuses }} 
+                                           onchange="updateStatusFilter()">
+                                    <span class="checkmark"></span>
+                                    <span class="status-badge status-delivered">Delivered</span>
+                                </label>
+                                <label class="checkbox-item">
+                                    <input type="checkbox" name="status" value="cancelled" 
+                                           {{ 'checked' if 'cancelled' in selected_statuses }} 
+                                           onchange="updateStatusFilter()">
+                                    <span class="checkmark"></span>
+                                    <span class="status-badge status-cancelled">Cancelled</span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="search">Search:</label>
@@ -202,9 +229,11 @@
 
             <!-- Pagination -->
             {% if pagination.pages > 1 %}
+            {% set args_without_page = request.args.copy() %}
+            {% set _ = args_without_page.pop('page', None) %}
             <div class="pagination">
                 {% if pagination.has_prev %}
-                    <a href="{{ url_for('admin_dashboard', page=pagination.prev_num, **request.args) }}">
+                    <a href="{{ url_for('admin_dashboard', page=pagination.prev_num, **args_without_page) }}">
                         <i class="fas fa-chevron-left"></i> Previous
                     </a>
                 {% endif %}
@@ -212,7 +241,7 @@
                 {% for page_num in pagination.iter_pages() %}
                     {% if page_num %}
                         {% if page_num != pagination.page %}
-                            <a href="{{ url_for('admin_dashboard', page=page_num, **request.args) }}">{{ page_num }}</a>
+                            <a href="{{ url_for('admin_dashboard', page=page_num, **args_without_page) }}">{{ page_num }}</a>
                         {% else %}
                             <span class="current">{{ page_num }}</span>
                         {% endif %}
@@ -222,7 +251,7 @@
                 {% endfor %}
                 
                 {% if pagination.has_next %}
-                    <a href="{{ url_for('admin_dashboard', page=pagination.next_num, **request.args) }}">
+                    <a href="{{ url_for('admin_dashboard', page=pagination.next_num, **args_without_page) }}">
                         Next <i class="fas fa-chevron-right"></i>
                     </a>
                 {% endif %}
@@ -901,37 +930,106 @@
 
         function initializeChart() {
             const ctx = document.getElementById('revenueChart').getContext('2d');
+            
+            // Create gradient for enhanced visual appeal
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, 'rgba(34, 197, 94, 0.8)');   // Bright green at top
+            gradient.addColorStop(0.5, 'rgba(34, 197, 94, 0.4)'); // Medium green in middle
+            gradient.addColorStop(1, 'rgba(34, 197, 94, 0.1)');   // Light green at bottom
+            
+            const borderGradient = ctx.createLinearGradient(0, 0, 0, 400);
+            borderGradient.addColorStop(0, 'rgba(21, 128, 61, 1)');   // Dark green
+            borderGradient.addColorStop(1, 'rgba(34, 197, 94, 1)');   // Bright green
+            
             revenueChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: [],
                     datasets: [{
-                        label: 'Revenue (₹)',
+                        label: 'Delivered Orders Revenue (₹)',
                         data: [],
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
-                        tension: 0.1,
-                        fill: true
+                        borderColor: borderGradient,
+                        backgroundColor: gradient,
+                        borderWidth: 3,
+                        tension: 0.4,
+                        fill: true,
+                        pointBackgroundColor: '#22c55e',
+                        pointBorderColor: '#15803d',
+                        pointBorderWidth: 2,
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        pointHoverBackgroundColor: '#16a34a',
+                        pointHoverBorderColor: '#15803d',
+                        pointHoverBorderWidth: 3,
+                        shadowColor: 'rgba(34, 197, 94, 0.3)',
+                        shadowBlur: 10,
+                        shadowOffsetX: 0,
+                        shadowOffsetY: 4
                     }, {
-                        label: 'Orders',
+                        label: 'Delivered Orders Count',
                         data: [],
-                        borderColor: 'rgb(255, 99, 132)',
-                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
-                        tension: 0.1,
-                        yAxisID: 'y1'
+                        borderColor: 'rgba(21, 128, 61, 0.8)',
+                        backgroundColor: 'rgba(21, 128, 61, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        fill: false,
+                        yAxisID: 'y1',
+                        pointBackgroundColor: '#15803d',
+                        pointBorderColor: '#166534',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointHoverBackgroundColor: '#15803d',
+                        pointHoverBorderColor: '#166534'
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
                     scales: {
+                        x: {
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)',
+                                borderColor: 'rgba(0, 0, 0, 0.1)'
+                            },
+                            ticks: {
+                                color: '#374151',
+                                font: {
+                                    size: 12,
+                                    weight: '500'
+                                }
+                            }
+                        },
                         y: {
                             type: 'linear',
                             display: true,
                             position: 'left',
                             title: {
                                 display: true,
-                                text: 'Revenue (₹)'
+                                text: 'Revenue (₹)',
+                                color: '#15803d',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(34, 197, 94, 0.1)',
+                                borderColor: 'rgba(34, 197, 94, 0.2)'
+                            },
+                            ticks: {
+                                color: '#15803d',
+                                font: {
+                                    size: 11,
+                                    weight: '500'
+                                },
+                                callback: function(value) {
+                                    return '₹' + value.toLocaleString('en-IN');
+                                }
                             }
                         },
                         y1: {
@@ -940,20 +1038,84 @@
                             position: 'right',
                             title: {
                                 display: true,
-                                text: 'Number of Orders'
+                                text: 'Orders Delivered',
+                                color: '#166534',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
                             },
                             grid: {
                                 drawOnChartArea: false,
                             },
+                            ticks: {
+                                color: '#166534',
+                                font: {
+                                    size: 11,
+                                    weight: '500'
+                                }
+                            }
                         }
                     },
                     plugins: {
                         title: {
                             display: true,
-                            text: 'Revenue and Orders Over Time'
+                            text: 'Delivered Orders Revenue Analytics',
+                            color: '#15803d',
+                            font: {
+                                size: 18,
+                                weight: 'bold'
+                            },
+                            padding: {
+                                top: 10,
+                                bottom: 20
+                            }
                         },
                         legend: {
-                            display: true
+                            display: true,
+                            position: 'top',
+                            align: 'end',
+                            labels: {
+                                color: '#374151',
+                                font: {
+                                    size: 12,
+                                    weight: '500'
+                                },
+                                usePointStyle: true,
+                                pointStyle: 'circle',
+                                padding: 20
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                            titleColor: '#15803d',
+                            bodyColor: '#374151',
+                            borderColor: '#22c55e',
+                            borderWidth: 2,
+                            cornerRadius: 8,
+                            displayColors: true,
+                            titleFont: {
+                                size: 14,
+                                weight: 'bold'
+                            },
+                            bodyFont: {
+                                size: 13
+                            },
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.datasetIndex === 0) {
+                                        return 'Revenue: ₹' + context.parsed.y.toLocaleString('en-IN');
+                                    } else {
+                                        return 'Orders: ' + context.parsed.y;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    elements: {
+                        line: {
+                            borderJoinStyle: 'round',
+                            borderCapStyle: 'round'
                         }
                     }
                 }
@@ -962,14 +1124,14 @@
 
         function updateAnalytics() {
             const days = document.getElementById('analytics-days').value;
-            const status = document.getElementById('analytics-status').value;
             const loading = document.getElementById('chartLoading');
             
             loading.style.display = 'block';
             
             const params = new URLSearchParams();
             params.append('days', days);
-            if (status) params.append('status', status);
+            // Exclusively fetch delivered orders data
+            params.append('status', 'delivered');
             
             fetch(`/api/admin/revenue-timeseries?${params.toString()}`)
                 .then(response => response.json())
@@ -1006,6 +1168,69 @@
             } else {
                 initializeChart();
                 updateAnalytics();
+            }
+            
+            // Initialize multi-select displays
+            updateStatusDisplay();
+        });
+
+        // Multi-select Status Filter Functions
+        function toggleStatusDropdown() {
+            const dropdown = document.getElementById('status-dropdown');
+            const header = dropdown.previousElementSibling;
+            
+            if (dropdown.style.display === 'none' || dropdown.style.display === '') {
+                dropdown.style.display = 'block';
+                header.classList.add('active');
+                // Close analytics dropdown if open
+                const analyticsDropdown = document.getElementById('analytics-status-dropdown');
+                if (analyticsDropdown) {
+                    analyticsDropdown.style.display = 'none';
+                    analyticsDropdown.previousElementSibling.classList.remove('active');
+                }
+            } else {
+                dropdown.style.display = 'none';
+                header.classList.remove('active');
+            }
+        }
+
+        function updateStatusFilter() {
+            updateStatusDisplay();
+            // Submit form after a short delay to allow for multiple quick selections
+            setTimeout(() => {
+                document.getElementById('filter-form').submit();
+            }, 300);
+        }
+
+        function updateStatusDisplay() {
+            const checkboxes = document.querySelectorAll('#status-dropdown input[type="checkbox"]');
+            const display = document.getElementById('status-display');
+            const selected = [];
+            
+            checkboxes.forEach(checkbox => {
+                if (checkbox.checked) {
+                    selected.push(checkbox.value.charAt(0).toUpperCase() + checkbox.value.slice(1));
+                }
+            });
+            
+            if (selected.length === 0) {
+                display.textContent = 'All Statuses';
+            } else if (selected.length === 1) {
+                display.textContent = selected[0];
+            } else {
+                display.textContent = `${selected.length} Selected`;
+            }
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            const statusMultiselect = document.querySelector('.status-multiselect');
+            
+            if (statusMultiselect && !statusMultiselect.contains(event.target)) {
+                const dropdown = document.getElementById('status-dropdown');
+                const header = dropdown.previousElementSibling;
+                dropdown.style.display = 'none';
+                header.classList.remove('active');
             }
         });
     </script>
