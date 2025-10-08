@@ -102,7 +102,14 @@ class CustomerAuthService:
         
         # Check if token is expired (24 hours)
         if customer.email_verification_sent_at:
-            expiry_time = customer.email_verification_sent_at + timedelta(hours=24)
+            # Ensure both datetimes are timezone-aware for comparison
+            if customer.email_verification_sent_at.tzinfo is None:
+                # If stored datetime is naive, assume it's UTC
+                sent_at_utc = customer.email_verification_sent_at.replace(tzinfo=timezone.utc)
+            else:
+                sent_at_utc = customer.email_verification_sent_at
+            
+            expiry_time = sent_at_utc + timedelta(hours=24)
             if datetime.now(timezone.utc) > expiry_time:
                 return False, None, "Verification token has expired"
         

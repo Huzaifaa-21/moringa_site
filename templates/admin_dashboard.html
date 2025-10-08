@@ -570,7 +570,7 @@
                 button.innerHTML = '<i class="fas fa-play"></i> Auto Refresh';
                 button.classList.remove('active');
             } else {
-                refreshInterval = setInterval(refreshOrders, 5000); // Refresh every 5 seconds
+                refreshInterval = setInterval(refreshOrders, 30000); // Refresh every 5 seconds
                 isAutoRefreshEnabled = true;
                 button.innerHTML = '<i class="fas fa-pause"></i> Auto Refresh';
                 button.classList.add('active');

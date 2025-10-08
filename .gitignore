@@ -2,3 +2,4 @@
 __pycache__/
 admin.jar
 cookies.txt
+.DS_Store
